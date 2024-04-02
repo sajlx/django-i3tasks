@@ -13,8 +13,8 @@ from google.cloud import pubsub_v1
 
 from django.conf import settings
 
-from i3tasks.types import I3TasksSettings
-from i3tasks.types import Queue
+from django_i3tasks.types import I3TasksSettings
+from django_i3tasks.types import Queue
 
 
 logger = logging.getLogger(__name__)

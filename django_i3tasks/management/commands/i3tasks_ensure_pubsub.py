@@ -8,9 +8,9 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.core.management.base import CommandError
 
-from i3tasks.queue_manager.google_pubsub import PubSubSystemUtils
+from django_i3tasks.queue_manager.google_pubsub import PubSubSystemUtils
 
-# from i3tasks.utils import PubSubSystemUtils
+# from django_i3tasks.utils import PubSubSystemUtils
 
 # from . import _create_data
 

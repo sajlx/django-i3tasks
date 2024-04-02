@@ -20,7 +20,7 @@ from django.views import View
 
 from django.utils.decorators import method_decorator
 
-from i3tasks.utils import TaskDecorator
+from django_i3tasks.utils import TaskDecorator
 
 
 logger = logging.getLogger(__name__)

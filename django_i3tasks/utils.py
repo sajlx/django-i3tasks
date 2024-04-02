@@ -13,7 +13,7 @@ import datetime
 
 from django.conf import settings
 
-from i3tasks.queue_manager.google_pubsub import PubSubSystemUtils, get_default_queue_setting
+from django_i3tasks.queue_manager.google_pubsub import PubSubSystemUtils, get_default_queue_setting
 
 
 logger = logging.getLogger(__name__)
