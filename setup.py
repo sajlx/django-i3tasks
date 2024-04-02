@@ -1,5 +1,6 @@
 # setup.py
 from setuptools import setup
+# from setuptools import find_packages
 
 from pathlib import Path
 this_directory = Path(__file__).parent
@@ -7,7 +8,7 @@ long_description = (this_directory / "README.md").read_text()
 
 setup(
     name='django_i3tasks',
-    version='0.0.8',
+    version='0.0.14',
     description='Django app for manage async tasks by http requests',
     long_description=long_description,
     long_description_content_type='text/markdown',
@@ -15,7 +16,13 @@ setup(
     author='Ivan Bettarini',
     author_email='ivan.bettarini@gmail.com',
     license='GNU General Public License v3.0',
-    packages=['django_i3tasks'],
+    # packages=find_packages(),
+    packages=[
+        'django_i3tasks',
+        'django_i3tasks.queue_manager',
+        'django_i3tasks.management',
+        'django_i3tasks.migrations',
+    ],
     zip_safe=False,
     install_requires=[
         'django',
