@@ -1,11 +1,16 @@
 # setup.py
 from setuptools import setup
 
+from pathlib import Path
+this_directory = Path(__file__).parent
+long_description = (this_directory / "README.md").read_text()
+
 setup(
     name='django_i3tasks',
-    version='0.0.2',
+    version='0.0.3',
     description='Django app for manage async tasks by http requests',
-    long_description='Django app for manage async tasks by http requests',
+    long_description=long_description,
+    long_description_content_type='text/markdown',
     url='https://github.com/sajlx/django-i3tasks',
     author='Ivan Bettarini',
     author_email='ivan.bettarini@gmail.com',
@@ -15,7 +20,8 @@ setup(
     install_requires=[
         'django',
         'djangorestframework',
-        'requests'
+        'requests',
+        'croniter>=2.0.1'
         # 'celery',
         # 'redis',
     ],
