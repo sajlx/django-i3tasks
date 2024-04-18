@@ -172,7 +172,7 @@ class PushedTaskView(View):
 
         try:
             logger.error(f"Execution of {task} with args={data['args']} kwargs={data['kwargs']}")
-            result = task.sync_run(*data["args"], **data["kwargs"])
+            result = task.sync_run(meta_info=data['meta_info'], *data["args"], **data["kwargs"])
         except Exception:
             logger.error(f"Error on task execution {task} args={data['args']} kwargs={data['kwargs']}")
             return JsonResponse({'status': 'bad', 'error': "Error on task execution"}, status=400)

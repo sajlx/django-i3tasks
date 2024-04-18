@@ -62,6 +62,7 @@ class I3TasksSettings():
     default_queue = None
     other_queues = []
     schedules = []
+    force_sync = False
 
     def __init__(
             self,
@@ -69,8 +70,12 @@ class I3TasksSettings():
             default_queue: Queue,
             other_queues: 'tuple[Queue, ...]',
             schedules: 'tuple[Schedule, ...]',
+            force_sync: bool = False,
+            default_max_retries: int = 3
         ) -> None:
         self.namespace = namespace
         self.default_queue = default_queue
         self.other_queues = other_queues
         self.schedules = schedules
+        self.force_sync = force_sync
+        self.default_max_retries = default_max_retries

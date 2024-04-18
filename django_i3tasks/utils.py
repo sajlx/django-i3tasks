@@ -13,7 +13,14 @@ import datetime
 
 from django.conf import settings
 
-from django_i3tasks.queue_manager.google_pubsub import PubSubSystemUtils, get_default_queue_setting
+from django.db import transaction
+
+from .exceptions import MaxRetriesExceededError
+from .queue_manager.google_pubsub import PubSubSystemUtils, get_default_queue_setting
+
+from .models import TaskExecution
+from .models import TaskExecutionResult
+from .models import TaskExecutionTry
 
 
 logger = logging.getLogger(__name__)
@@ -67,6 +74,7 @@ class TaskDecorator:
         topic_name=get_default_queue_setting("queue_name", "default"),
         subscription_name=get_default_queue_setting("subscription_name", "default"),
         encoding="utf-8",  # 'utf-32',
+        max_retries=settings.I3TASKS.default_max_retries,
     ):
         functools.update_wrapper(self, func)
         self._func = func
@@ -87,6 +95,11 @@ class TaskDecorator:
         self.module_name = inspect.getmodule(self._func).__name__
 
         self.func_name = self._func.__name__
+
+        self.max_retries = max_retries
+
+        self.task_execution = None
+        self.task_execution_try = None
 
         self.get_meta_info()
 
@@ -110,6 +123,8 @@ class TaskDecorator:
             "encoding": self.pubsub_system_utils.encoding,
             "module_name": self.module_name,
             "func_name": self.func_name,
+            "task_execution_id": self.task_execution.id if self.task_execution else None,
+            "task_execution_try_id": self.task_execution_try.id if self.task_execution_try else None,
         }
         return self.meta_info
 
@@ -134,19 +149,126 @@ class TaskDecorator:
         # )
         # future.result()
 
+    def delay(self, *args, **kwargs):
+        return self.async_run(*args, **kwargs)
+
     def async_run(self, *args, **kwargs):
         # binary_serialized_data = self.serialize(*args, **kwargs)
-        self.enqueue(*args, **kwargs)
 
+        if settings.I3TASKS.force_sync:
+            # self.serialize(*args, **kwargs)
+            task_execution_try = self.sync_run(*args, **kwargs)
+            return task_execution_try
+        else:
+            task_execution, task_execution_try = self._get_or_create_task_execution(*args, **kwargs)
+            self.enqueue(*args, **kwargs)
+            return task_execution_try
         # self._run(*args, **kwargs)
 
-    def sync_run(self, *args, **kwargs):
+    def sync_run(self, meta_info=None, *args, **kwargs):
         self.serialize(*args, **kwargs)
-        return self._run(*args, **kwargs)
+
+        task_execution, task_execution_try = self._get_or_create_task_execution(
+            meta_info__task_execution_id=meta_info.get("task_execution_id", None),
+            meta_info__task_execution_try_id=meta_info.get("task_execution_try_id", None),
+            *args, **kwargs
+        )
+
+        task_execution_try.started_at_at = datetime.datetime.now()
+        task_execution_try.save()
+        try:
+            direct_result = self._run(*args, **kwargs)
+            task_execution_try.is_success = True
+            task_execution_try.is_completed = True
+            task_execution_try.finished_at = datetime.datetime.now()
+            task_execution_try.save()
+        except Exception as e:
+            task_execution_try.finished_at = datetime.datetime.now()
+            task_execution_try.save()
+            TaskExecutionResult(
+                task_execution_try=task_execution_try,
+                result=str(e),
+            ).save()
+            raise e
+
+        try:
+            TaskExecutionResult(
+                task_execution_try=task_execution_try,
+                result=json.dumps(direct_result),
+            ).save()
+        except Exception as e:
+            # direct_result = self.sync_run(*args, **kwargs)
+            logger.warning(f"Error saving TaskExecutionResult: {e}")
+            TaskExecutionResult(
+                task_execution_try=task_execution_try,
+                result=str(direct_result),
+            ).save()
+            return task_execution_try
+
+        # return direct_result
+
+    @transaction.atomic
+    def _get_or_create_task_execution(self, meta_info__task_execution_id=None, meta_info__task_execution_try_id=None, *args, **kwargs):
+        task_execution = None
+        if meta_info__task_execution_id:
+            try:
+
+                task_execution = TaskExecution.objects.get(id=meta_info__task_execution_id)
+            except TaskExecution.DoesNotExist:
+                logger.warning(f"TaskExecution.DoesNotExist: {meta_info__task_execution_id}")
+        else:
+            task_execution = TaskExecution(
+                module_name=self.module_name,
+                func_name=self.func_name,
+                args=args,
+                kwargs=kwargs,
+            )
+            task_execution.save()
+
+        self.task_execution = task_execution
+
+        task_execution_try = None
+
+        if meta_info__task_execution_try_id:
+            task_execution_try = TaskExecutionTry.objects.get(id=meta_info__task_execution_try_id)
+        else:
+            if not task_execution.tries.exixts():
+                task_execution_try = TaskExecutionTry(
+                    task_execution=task_execution,
+                    try_number=1,
+                )
+                task_execution_try.save()
+            else:
+
+                last_task_execution_try = task_execution.tries.last()
+
+                if last_task_execution_try.try_number + 1 > self.max_retries:
+                    task_execution_try = TaskExecutionTry(
+                        task_execution=task_execution,
+                        try_number=last_task_execution_try.try_number + 1,
+                    )
+                    task_execution_try.save()
+
+                    TaskExecutionResult(
+                        task_execution_try=task_execution_try,
+                        result="Max Retries Exceeded",
+                    ).save()
+                    raise MaxRetriesExceededError()
+
+                task_execution_try = TaskExecutionTry(
+                    task_execution=task_execution,
+                    try_number=last_task_execution_try.try_number + 1,
+                )
+                task_execution_try.save()
+
+        self.task_execution_try = task_execution_try
+
+        return task_execution, task_execution_try
 
     def _run(self, *args, **kwargs):
         # self.num_calls += 1
         # logger.info(f"Call {self.num_calls} of {self._func.__name__!r}")
+
         start_time = time.perf_counter()  # 1
         # logger.info("Something is happening before the function is called.")
         task_result = None

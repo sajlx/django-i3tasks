@@ -8,7 +8,7 @@ virtualenv_create:
 .PHONY: virtualenv_activate
 virtualenv_activate:
 	@echo "Activating virtualenv"
-	@source venv/bin/activate
+	@echo "run 'source venv/bin/activate'"
 
 
 .PHONY: package_build
