@@ -53,8 +53,8 @@ class TaskExecutionTry(CreatedUpdatedModel):
     try_number = models.IntegerField(null=False, blank=False, default=1)
 
     asked_at = models.DateTimeField(auto_now_add=True)
-    started_at = models.DateTimeField(null=False, blank=True)
-    finished_at = models.DateTimeField(null=False, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
 
     is_completed = models.BooleanField(null=False, blank=False, default=False)
     is_success = models.BooleanField(null=False, blank=False, default=False)
