@@ -154,13 +154,21 @@ class TaskDecorator:
 
     def async_run(self, *args, **kwargs):
         # binary_serialized_data = self.serialize(*args, **kwargs)
-
+        # import ipdb
+        # ipdb.set_trace()
         if settings.I3TASKS.force_sync:
             # self.serialize(*args, **kwargs)
             task_execution_try = self.sync_run(*args, **kwargs)
             return task_execution_try
         else:
-            task_execution, task_execution_try = self._get_or_create_task_execution(*args, **kwargs)
+            meta_info = self.get_meta_info()
+            task_execution, task_execution_try = self._get_or_create_task_execution(
+                meta_info=meta_info,
+                _args=args,
+                _kwargs=kwargs
+                # *args,
+                # **kwargs
+            )
             self.enqueue(*args, **kwargs)
             return task_execution_try
         # self._run(*args, **kwargs)
@@ -169,9 +177,11 @@ class TaskDecorator:
         self.serialize(*args, **kwargs)
 
         task_execution, task_execution_try = self._get_or_create_task_execution(
-            meta_info__task_execution_id=meta_info.get("task_execution_id", None),
-            meta_info__task_execution_try_id=meta_info.get("task_execution_try_id", None),
-            *args, **kwargs
+            meta_info=meta_info,
+            # meta_info__task_execution_id=meta_info.get("task_execution_id", None),
+            # meta_info__task_execution_try_id=meta_info.get("task_execution_try_id", None),
+            _args=args,
+            _kwargs=kwargs
         )
 
         task_execution_try.started_at_at = datetime.datetime.now()
@@ -208,8 +218,15 @@ class TaskDecorator:
         # return direct_result
 
     @transaction.atomic
-    def _get_or_create_task_execution(self, meta_info__task_execution_id=None, meta_info__task_execution_try_id=None, *args, **kwargs):
+    def _get_or_create_task_execution(self, meta_info, _args, _kwargs):
+        # import ipdb
+        # ipdb.set_trace()
+
+        meta_info__task_execution_id = meta_info.get("task_execution_id", None)
+        meta_info__task_execution_try_id = meta_info.get("task_execution_try_id", None)
+
         task_execution = None
+
         if meta_info__task_execution_id:
             try:
 
@@ -218,10 +235,10 @@ class TaskDecorator:
                 logger.warning(f"TaskExecution.DoesNotExist: {meta_info__task_execution_id}")
         else:
             task_execution = TaskExecution(
-                module_name=self.module_name,
-                func_name=self.func_name,
-                args=args,
-                kwargs=kwargs,
+                task_name=self.func_name,
+                task_path=self.module_name,
+                task_args=_args,
+                task_kwargs=_kwargs,
             )
             task_execution.save()
 
@@ -232,10 +249,12 @@ class TaskDecorator:
         if meta_info__task_execution_try_id:
             task_execution_try = TaskExecutionTry.objects.get(id=meta_info__task_execution_try_id)
         else:
-            if not task_execution.tries.exixts():
+            if not task_execution.tries.exists():
                 task_execution_try = TaskExecutionTry(
                     task_execution=task_execution,
                     try_number=1,
+                    # started_at='',
+                    # finished_at='',
                 )
                 task_execution_try.save()
             else:
@@ -246,6 +265,8 @@ class TaskDecorator:
                     task_execution_try = TaskExecutionTry(
                         task_execution=task_execution,
                         try_number=last_task_execution_try.try_number + 1,
+                        # started_at='',
+                        # finished_at='',
                     )
                     task_execution_try.save()
 
@@ -258,6 +279,8 @@ class TaskDecorator:
                 task_execution_try = TaskExecutionTry(
                     task_execution=task_execution,
                     try_number=last_task_execution_try.try_number + 1,
+                    # started_at='',
+                    # finished_at='',
                 )
                 task_execution_try.save()
 
