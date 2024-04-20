@@ -66,7 +66,7 @@ class TaskExecutionTry(CreatedUpdatedModel):
 
 class TaskExecutionResult(CreatedUpdatedModel):
     task_execution_try = models.OneToOneField(
-        TaskExecution,
+        TaskExecutionTry,
         on_delete=models.CASCADE,
         related_name="result",
         # blank=True,

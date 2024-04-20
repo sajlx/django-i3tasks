@@ -6,6 +6,7 @@ import logging
 import base64
 import datetime
 import importlib
+
 from django.views.decorators.csrf import csrf_exempt
 
 # from django.views.decorators.http import require_POST
@@ -20,7 +21,9 @@ from django.views import View
 
 from django.utils.decorators import method_decorator
 
-from django_i3tasks.utils import TaskDecorator
+from .models import TaskExecutionTry
+
+from .utils import TaskDecorator, TaskObj
 
 
 logger = logging.getLogger(__name__)
@@ -106,26 +109,26 @@ class PushedTaskView(View):
 
         try:
             json_body = json.loads(request_body)
-            logger.info(f"json_body ==> {json_body}")
-            logger.info(
+            logger.debug(f"json_body ==> {json_body}")
+            logger.debug(
                 f'encoding ==> {json_body["message"]["attributes"]["encoding"]}'
             )
-            logger.info(f'data ==> {json_body["message"]["data"]}')
+            logger.debug(f'data ==> {json_body["message"]["data"]}')
             # decoded_data = str(
             #     object=json_body["message"]["data"],
             #     encoding=json_body["message"]["attributes"]["encoding"],
             #     errors="strict",
             # )
             decoded_data_base4 = base64.b64decode(json_body["message"]["data"])
-            logger.info(f"data decoded base64 ==> {decoded_data_base4}")
+            logger.debug(f"data decoded base64 ==> {decoded_data_base4}")
             decoded_data = decoded_data_base4.decode(
                 encoding=json_body["message"]["attributes"]["encoding"],
                 errors="strict",
             )
-            # logger.info(
-            logger.info(f"data decoded ==> {decoded_data}")
+            # logger.debug(
+            logger.debug(f"data decoded ==> {decoded_data}")
             data = json.loads(decoded_data)
-            logger.info(f"data ==> {data}")
+            logger.debug(f"data ==> {data}")
 
         except Exception as exc:
             logger.error(exc)
@@ -144,86 +147,85 @@ class PushedTaskView(View):
             raise
         return task
 
+    def format_json_response(self, status, result):
+        return {'status': status, 'result': result}
+
+    def return_error_with_200(self, message):
+        logger.error(f"{message}")
+        return JsonResponse({'status': 'bad', 'error': message}, status=200)
+
     @csrf_exempt
     def post(self, request, *args, **kwargs):
         if not request.body:
-            logger.error(f"missing post data")
-            return JsonResponse({'status': 'bad', 'error': "missing post data"}, status=400)
+            return self.return_error_with_200(f"missing post data")
 
         try:
             data = self.get_data(request_body=request.body)
         except Exception:
-            logger.error(f"impossible to decode body")
-            return JsonResponse({'status': 'bad', 'error': "impossible to decode body"}, status=400)
+            return self.return_error_with_200(f"impossible to decode body")
 
         if data is None:
-            logger.error(f"None Data")
-            return JsonResponse({'status': 'bad', 'error': "None Data"}, status=400)
+            return self.return_error_with_200(f"None Data")
+
+        if not data.get("meta_info", None):
+            return self.return_error_with_200(f"Not meta_info in data {data}")
+
+        logger.debug(f"Get meta_info {data['meta_info']}")
 
         try:
             task = self.import_task(data["meta_info"])
         except Exception:
-            logger.error(f"Not founded task {data['meta_info']}")
-            return JsonResponse({'status': 'bad', 'error': "Not founded task"}, status=400)
+            return self.return_error_with_200(f"Not founded task {data['meta_info']}")
 
         if task is None:
-            logger.error(f"Not founded task is none {data['meta_info']}")
-            return JsonResponse({'status': 'bad', 'error': "Not founded task"}, status=400)
+            return self.return_error_with_200(f"Not founded task is none {data['meta_info']}")
+
+        # TODO: create import and rerun from db ids
+        task_execution_try_id = None
+        try:
+            # task_execution_id
+            task_execution_try_id = data.get('meta_info', {}).get("task_execution_try_id", None)
+        except Exception as exc:
+            logger.error(f"Error on get task_execution_try_id")
+            return self.return_error_with_200(f"Not task_execution_try_id in meta_info in data {data['meta_info']}")
+            # logger.error(exc, exc_info=True)
+
+        # task_execution_try_id
+        task_execution_try = None
+        try:
+            task_execution_try = TaskExecutionTry.objects.get(id=task_execution_try_id)
+        except TaskExecutionTry.DoesNotExist:
+            return self.return_error_with_200(f"TaskExecutionTry.DoesNotExist {task_execution_try_id}")
+
+        task_obj = TaskObj(
+            task_execution_id=task_execution_try.task_execution_id,
+            encoding=task.encoding,
+            max_retries=task.max_retries,
+            pubsub_system_utils=task.pubsub_system_utils,
+            pubsub_task_utils=task.pubsub_task_utils,
+        )
 
         try:
-            logger.error(f"Execution of {task} with args={data['args']} kwargs={data['kwargs']}")
-            result = task.sync_run(meta_info=data['meta_info'], *data["args"], **data["kwargs"])
-        except Exception:
-            logger.error(f"Error on task execution {task} args={data['args']} kwargs={data['kwargs']}")
-            return JsonResponse({'status': 'bad', 'error': "Error on task execution"}, status=400)
-
-        return JsonResponse({'status': 'ok', 'result': result}, status=200)
-
-
-# @csrf_exempt
-#     @require_POST
-#     def pushed_tasks(request):
-#         if not request.body:
-#             return HttpResponse("missing post data", status=400)
-
-#         data = None
-
-#         try:
-#             json_body = json.loads(request.body)
-#             logger.info(f"json_body ==> {json_body}")
-#             logger.info(f'encoding ==> {json_body["message"]["attributes"]["encoding"]}')
-#             logger.info(f'data ==> {json_body["message"]["data"]}')
-#             # decoded_data = str(
-#             #     object=json_body["message"]["data"],
-#             #     encoding=json_body["message"]["attributes"]["encoding"],
-#             #     errors="strict",
-#             # )
-#             decoded_data_base4 = base64.b64decode(json_body["message"]["data"])
-#             logger.info(f"data decoded base64 ==> {decoded_data_base4}")
-#             decoded_data = decoded_data_base4.decode(
-#                 encoding=json_body["message"]["attributes"]["encoding"],
-#                 errors="strict",
-#             )
-#             # logger.info(
-#             logger.info(f"data decoded ==> {decoded_data}")
-#             data = json.loads(decoded_data)
-#             logger.info(f"data ==> {data}")
-
-#         except Exception as exc:
-#             logger.error(exc)
-#             return HttpResponse("impossible to decode body", status=400)
-
-#         if data is None:
-#             return HttpResponse("None Data", status=400)
-
-#         task = None
-#         try:
-#             # equiv. of your `import matplotlib.text as text`
-#             task_module = importlib.import_module(data["meta_info"]["module_name"])
-#             task = getattr(task_module, data["meta_info"]["func_name"])
-#         except Exception as exc:
-#             logging.error(exc)
-
-#         task.sync_run(*data["args"], **data["kwargs"])
-
-#         return HttpResponse("asd", status=200)
+            logger.info(
+                f"Execution of {task_obj}, retry number: {task_execution_try.try_number} with args={task_obj.task_args} kwargs={task_obj.task_kwargs}"
+            )
+            task_execution_try = task_obj.run_from_async(task_execution_try_id=task_execution_try_id)
+            json_result = {
+                # 'status': 'ok',
+                'task_execution_id': task_execution_try.task_execution.id,
+                'task_execution_try_id': task_execution_try.id,
+                # 'task_execution_try_id': task_execution_try.id,
+                'try_number': task_execution_try.try_number,
+                'asked_at': task_execution_try.asked_at,
+                'started_at': task_execution_try.started_at,
+                'finished_at': task_execution_try.finished_at,
+                'is_completed': task_execution_try.is_completed,
+                'is_success': task_execution_try.is_success,
+                'result': task_execution_try.result.result if hasattr(task_execution_try, 'result') else None,
+            }
+            return JsonResponse({'status': 'ok', 'result': json_result}, status=200)
+        except Exception as exc:
+            logger.error(f"Error on task execution {task_obj} args={task_obj.task_args} kwargs={task_obj.task_kwargs}")
+            logger.error(exc, exc_info=True)
+            # logger.error(exc.with_traceback())
+            return JsonResponse({'status': 'bad', 'error': "Error on task execution"}, status=200)
