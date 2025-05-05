@@ -24,7 +24,7 @@ package_build:
 .PHONY: package_upload
 package_upload:
 	@echo "Upload package"
-	@twine upload dist/*
+	@twine upload dist/* --verbose
 
 .PHONY: urls
 urls:

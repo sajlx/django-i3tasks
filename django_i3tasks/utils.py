@@ -263,6 +263,9 @@ class TaskObj:
 
         mex = f"Starting {self.func_name} (ID:{self.task_execution_db_instance.id}) at {datetime.datetime.now(datetime.UTC).isoformat()}"
         logger.info(mex)
+
+        mex_debug = f"func: {self.func}, module_name: {self.module_name}, func_name: {self.func_name}, Args: {args}, Kwargs: {kwargs}"
+        logger.info(mex_debug)
         # logger.info("Something is happening before the function is called.")
         task_result = None
         if self.bind:
@@ -275,8 +278,12 @@ class TaskObj:
         run_time = end_time - start_time  # 3
 
         mex = f"Finished {self.func_name} in {run_time:.4f} secs"
-
         logger.info(mex)
+
+        mex = f"Finished {self.func_name} in {run_time:.4f} secs, result: {task_result}"
+        logger.info(mex)
+
+
         return task_result
 
     def __call__(self, *args, **kwargs):
