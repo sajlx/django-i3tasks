@@ -29,7 +29,7 @@ from .utils import TaskDecorator, TaskObj
 logger = logging.getLogger(__name__)
 
 
-@method_decorator(csrf_exempt, name='dispatch')
+@method_decorator(csrf_exempt, name="dispatch")
 class BeatTaskView(View):
 
     def import_task(self, meta_info: dict) -> TaskDecorator:
@@ -55,10 +55,16 @@ class BeatTaskView(View):
 
         # if data is None:
         #     return HttpResponse("None Data", status=400)
-        i3tasks_settings = getattr(settings, 'I3TASKS', {})
-        schedules = getattr(i3tasks_settings, 'schedules', [])
+        i3tasks_settings = getattr(settings, "I3TASKS", {})
+        schedules = getattr(i3tasks_settings, "schedules", [])
 
-        now = datetime.datetime.utcnow()
+        now = datetime.datetime.now(datetime.timezone.utc)
+
+        # TODO:
+        # force now from header or body value
+        # put where to get in config
+        # example: X-CloudScheduler-ScheduleTime
+        # https://cloud.google.com/scheduler/docs/reference/rpc/google.cloud.scheduler.v1?_gl=1*1ydpxmp*_ga*MTk3ODIwNjg2My4xNzQ3MDU0ODI0*_ga_WH2QY8WWF5*czE3NDcyNDIzNzEkbzQkZzEkdDE3NDcyNDMyNzIkajU3JGwwJGgw#httptarget
 
         logger.info("test task matching cron at %s", now.isoformat())
         for schedule in schedules:
@@ -76,19 +82,18 @@ class BeatTaskView(View):
                     module_name,
                     func_name,
                     now,
-                    cron
+                    cron,
                 )
                 if cron_is_matched:
                     logger.info(
                         "launching async task %s.%s at %s",
                         module_name,
                         func_name,
-                        datetime.datetime.utcnow().isoformat()
+                        datetime.datetime.utcnow().isoformat(),
                     )
-                    task = self.import_task(meta_info={
-                        'module_name': module_name,
-                        'func_name': func_name
-                    })
+                    task = self.import_task(
+                        meta_info={"module_name": module_name, "func_name": func_name}
+                    )
                     task.async_run(*_args, **_kwargs)
                     # task_module = importlib.import_module(module_name)
                     # task = getattr(task_module, func_name)
@@ -99,10 +104,10 @@ class BeatTaskView(View):
             except Exception as exc:
                 logger.error(exc)
 
-        return JsonResponse({'status': 'ok'}, status=200)
+        return JsonResponse({"status": "ok"}, status=200)
 
 
-@method_decorator(csrf_exempt, name='dispatch')
+@method_decorator(csrf_exempt, name="dispatch")
 class PushedTaskView(View):
     def get_data(self, request_body):
         data = None
@@ -148,11 +153,11 @@ class PushedTaskView(View):
         return task
 
     def format_json_response(self, status, result):
-        return {'status': status, 'result': result}
+        return {"status": status, "result": result}
 
     def return_error_with_200(self, message):
         logger.error(f"{message}")
-        return JsonResponse({'status': 'bad', 'error': message}, status=200)
+        return JsonResponse({"status": "bad", "error": message}, status=200)
 
     @csrf_exempt
     def post(self, request, *args, **kwargs):
@@ -178,16 +183,22 @@ class PushedTaskView(View):
             return self.return_error_with_200(f"Not founded task {data['meta_info']}")
 
         if task is None:
-            return self.return_error_with_200(f"Not founded task is none {data['meta_info']}")
+            return self.return_error_with_200(
+                f"Not founded task is none {data['meta_info']}"
+            )
 
         # TODO: create import and rerun from db ids
         task_execution_try_id = None
         try:
             # task_execution_id
-            task_execution_try_id = data.get('meta_info', {}).get("task_execution_try_id", None)
+            task_execution_try_id = data.get("meta_info", {}).get(
+                "task_execution_try_id", None
+            )
         except Exception as exc:
             logger.error(f"Error on get task_execution_try_id")
-            return self.return_error_with_200(f"Not task_execution_try_id in meta_info in data {data['meta_info']}")
+            return self.return_error_with_200(
+                f"Not task_execution_try_id in meta_info in data {data['meta_info']}"
+            )
             # logger.error(exc, exc_info=True)
 
         # task_execution_try_id
@@ -195,7 +206,9 @@ class PushedTaskView(View):
         try:
             task_execution_try = TaskExecutionTry.objects.get(id=task_execution_try_id)
         except TaskExecutionTry.DoesNotExist:
-            return self.return_error_with_200(f"TaskExecutionTry.DoesNotExist {task_execution_try_id}")
+            return self.return_error_with_200(
+                f"TaskExecutionTry.DoesNotExist {task_execution_try_id}"
+            )
 
         task_obj = TaskObj(
             task_execution_id=task_execution_try.task_execution_id,
@@ -209,23 +222,33 @@ class PushedTaskView(View):
             logger.info(
                 f"Execution of {task_obj}, retry number: {task_execution_try.try_number} with args={task_obj.task_args} kwargs={task_obj.task_kwargs}"
             )
-            task_execution_try = task_obj.run_from_async(task_execution_try_id=task_execution_try_id)
+            task_execution_try = task_obj.run_from_async(
+                task_execution_try_id=task_execution_try_id
+            )
             json_result = {
                 # 'status': 'ok',
-                'task_execution_id': task_execution_try.task_execution.id,
-                'task_execution_try_id': task_execution_try.id,
+                "task_execution_id": task_execution_try.task_execution.id,
+                "task_execution_try_id": task_execution_try.id,
                 # 'task_execution_try_id': task_execution_try.id,
-                'try_number': task_execution_try.try_number,
-                'asked_at': task_execution_try.asked_at,
-                'started_at': task_execution_try.started_at,
-                'finished_at': task_execution_try.finished_at,
-                'is_completed': task_execution_try.is_completed,
-                'is_success': task_execution_try.is_success,
-                'result': task_execution_try.result.result if hasattr(task_execution_try, 'result') else None,
+                "try_number": task_execution_try.try_number,
+                "asked_at": task_execution_try.asked_at,
+                "started_at": task_execution_try.started_at,
+                "finished_at": task_execution_try.finished_at,
+                "is_completed": task_execution_try.is_completed,
+                "is_success": task_execution_try.is_success,
+                "result": (
+                    task_execution_try.result.result
+                    if hasattr(task_execution_try, "result")
+                    else None
+                ),
             }
-            return JsonResponse({'status': 'ok', 'result': json_result}, status=200)
+            return JsonResponse({"status": "ok", "result": json_result}, status=200)
         except Exception as exc:
-            logger.error(f"Error on task execution {task_obj} args={task_obj.task_args} kwargs={task_obj.task_kwargs}")
+            logger.error(
+                f"Error on task execution {task_obj} args={task_obj.task_args} kwargs={task_obj.task_kwargs}"
+            )
             logger.error(exc, exc_info=True)
             # logger.error(exc.with_traceback())
-            return JsonResponse({'status': 'bad', 'error': "Error on task execution"}, status=200)
+            return JsonResponse(
+                {"status": "bad", "error": "Error on task execution"}, status=200
+            )

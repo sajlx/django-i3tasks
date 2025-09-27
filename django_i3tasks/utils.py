@@ -6,6 +6,7 @@ import logging
 import inspect
 import datetime
 import importlib
+
 # import os
 # import google
 
@@ -87,7 +88,7 @@ class TaskTryObj:
         elif task_execution_try_id:
             self.task_execution_try_db_instance = TaskExecutionTry.objects.get(
                 id=task_execution_try_id,
-                task_execution_id=self.task_execution_db_instance.id
+                task_execution_id=self.task_execution_db_instance.id,
             )
         elif try_number:
             task_execution_try = TaskExecutionTry(
@@ -99,7 +100,9 @@ class TaskTryObj:
             task_execution_try.save()
             self.task_execution_try_db_instance = task_execution_try
         else:
-            raise Exception("task_execution_try_id or task_execution_try_db_instance is required")
+            raise Exception(
+                "task_execution_try_id or task_execution_try_db_instance is required"
+            )
 
 
 class TaskObj:
@@ -160,14 +163,21 @@ class TaskObj:
     def __str__(self):
         return f"{self.module_name}.{self.func_name} (ID:{self.task_execution_db_instance.id})"
 
-    def get_try_obj(self, task_execution_try_db_instance=None, task_execution_try_id=None, try_number=None):
+    def get_try_obj(
+        self,
+        task_execution_try_db_instance=None,
+        task_execution_try_id=None,
+        try_number=None,
+    ):
         task_try_obj = TaskTryObj(
             task_execution_db_instance=self.task_execution_db_instance,
             task_execution_try_id=task_execution_try_id,
             task_execution_try_db_instance=task_execution_try_db_instance,
             try_number=try_number,
         )
-        self.task_execution_try_db_instance = task_try_obj.task_execution_try_db_instance
+        self.task_execution_try_db_instance = (
+            task_try_obj.task_execution_try_db_instance
+        )
         return task_try_obj
 
     def get_meta_info(self):
@@ -176,8 +186,16 @@ class TaskObj:
             "encoding": self.pubsub_system_utils.encoding,
             "module_name": self.module_name,
             "func_name": self.func_name,
-            "task_execution_id": self.task_execution_db_instance.id if self.task_execution_db_instance else None,
-            "task_execution_try_id": self.task_execution_try_db_instance.id if self.task_execution_try_db_instance else None,
+            "task_execution_id": (
+                self.task_execution_db_instance.id
+                if self.task_execution_db_instance
+                else None
+            ),
+            "task_execution_try_id": (
+                self.task_execution_try_db_instance.id
+                if self.task_execution_try_db_instance
+                else None
+            ),
         }
         return self.meta_info
 
@@ -206,19 +224,13 @@ class TaskObj:
         self.task_kwargs = self.task_execution_db_instance.task_kwargs
         self.func_name = self.task_execution_db_instance.task_name
         self.module_name = self.task_execution_db_instance.task_path
-        func = self.import_task(
-            func_name=self.func_name, module_name=self.module_name
-        )
+        func = self.import_task(func_name=self.func_name, module_name=self.module_name)
         if isinstance(func, TaskDecorator):
             self.func = func._func
         else:
             self.func = func
 
-    def _create_task_db_instance(self,
-            func,
-            task_args=[],
-            task_kwargs={}
-        ):
+    def _create_task_db_instance(self, func, task_args=[], task_kwargs={}):
 
         func_name = func.__name__
         module_name = inspect.getmodule(func).__name__
@@ -283,7 +295,6 @@ class TaskObj:
         mex = f"Finished {self.func_name} in {run_time:.4f} secs, result: {task_result}"
         logger.info(mex)
 
-
         return task_result
 
     def __call__(self, *args, **kwargs):
@@ -309,7 +320,7 @@ class TaskObj:
             try_obj = self.get_try_obj(
                 task_execution_try_db_instance=None,
                 task_execution_try_id=None,
-                try_number=1
+                try_number=1,
             )
             task_execution_try = try_obj.task_execution_try_db_instance
             self.enqueue(*args, **kwargs)
@@ -317,12 +328,12 @@ class TaskObj:
         # self._run(*args, **kwargs)
 
     def run_from_async(
-            self,
-            task_execution_try_db_instance=None,
-            task_execution_try_id=None
-        ):
+        self, task_execution_try_db_instance=None, task_execution_try_id=None
+    ):
         if not task_execution_try_db_instance and not task_execution_try_id:
-            raise Exception("task_execution_try_db_instance or task_execution_try_id is required")
+            raise Exception(
+                "task_execution_try_db_instance or task_execution_try_id is required"
+            )
         try_obj = self.get_try_obj(
             task_execution_try_db_instance=task_execution_try_db_instance,
             task_execution_try_id=task_execution_try_id,
@@ -343,14 +354,17 @@ class TaskObj:
                 try_obj = self.get_try_obj(
                     # task_execution_try_db_instance=task_execution_try_db_instance,
                     # task_execution_try_id=task_execution_try_id,
-                    try_number=task_execution_try.try_number + 1
+                    try_number=task_execution_try.try_number
+                    + 1
                 )
                 task_execution_try = try_obj.task_execution_try_db_instance
                 self.enqueue(*self.task_args, **self.task_kwargs)
-                logger.warning(f"TaskExecutionTry is not success, task: {self} retrying: {try_obj.task_execution_try_db_instance.try_number}")
+                logger.warning(
+                    f"TaskExecutionTry is not success, task: {self} retrying: {try_obj.task_execution_try_db_instance.try_number}"
+                )
                 return task_execution_try
             else:
-                raise MaxRetriesExceededError(f'Max Retries Exceeded: {self}')
+                raise MaxRetriesExceededError(f"Max Retries Exceeded: {self}")
             # raise Exception("TaskExecutionTry is not success")
 
     def sync_run(self, *args, **kwargs):
@@ -360,7 +374,7 @@ class TaskObj:
         try_obj = self.get_try_obj(
             task_execution_try_db_instance=None,
             task_execution_try_id=None,
-            try_number=1
+            try_number=1,
         )
         task_execution_try = try_obj.task_execution_try_db_instance
 
@@ -403,8 +417,10 @@ class TaskObj:
             return task_execution_try
 
         try:
-            if hasattr(task_execution_try, 'result'):
-                logger.warning(f"TaskExecutionResult already exists: {task_execution_try.result}, {task_execution_try.result.result}")
+            if hasattr(task_execution_try, "result"):
+                logger.warning(
+                    f"TaskExecutionResult already exists: {task_execution_try.result}, {task_execution_try.result.result}"
+                )
                 task_execution_try.result.result = _res_json
                 task_execution_try.result.save()
             else:
@@ -418,8 +434,7 @@ class TaskObj:
             logger.warning(f"Error saving TaskExecutionResult: {e}")
             logger.exception(e, exc_info=True)
             TaskExecutionResult(
-                task_execution_try=task_execution_try,
-                result=str(direct_result)
+                task_execution_try=task_execution_try, result=str(direct_result)
             ).save()
             return task_execution_try
 
