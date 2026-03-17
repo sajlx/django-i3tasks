@@ -24,6 +24,7 @@ from .models import TaskExecution
 from .models import TaskExecutionResult
 from .models import TaskExecutionTry
 
+from .chain import ChainHandle
 
 logger = logging.getLogger(__name__)
 
@@ -301,22 +302,9 @@ class TaskObj:
         return self.sync_run(*args, **kwargs)
 
     def async_run(self, *args, **kwargs):
-        # binary_serialized_data = self.serialize(*args, **kwargs)
-        # import ipdb
-        # ipdb.set_trace()
         if settings.I3TASKS.force_sync:
-            # self.serialize(*args, **kwargs)
             task_execution_try = self.sync_run(*args, **kwargs)
-            return task_execution_try
         else:
-            # meta_info = self.get_meta_info()
-            # task_execution, task_execution_try = self._get_or_create_task_execution(
-            #     meta_info=meta_info,
-            #     _args=args,
-            #     _kwargs=kwargs
-            #     # *args,
-            #     # **kwargs
-            # )
             try_obj = self.get_try_obj(
                 task_execution_try_db_instance=None,
                 task_execution_try_id=None,
@@ -324,8 +312,7 @@ class TaskObj:
             )
             task_execution_try = try_obj.task_execution_try_db_instance
             self.enqueue(*args, **kwargs)
-            return task_execution_try
-        # self._run(*args, **kwargs)
+        return ChainHandle(task_execution_try=task_execution_try, steps=[])
 
     def run_from_async(
         self, task_execution_try_db_instance=None, task_execution_try_id=None

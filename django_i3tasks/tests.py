@@ -95,3 +95,27 @@ class ChainHandleTest(TestCase):
         handle.then(self.task_b)
         # steps accumulated in memory, no DB write (no task_execution_try)
         self.assertEqual(len(handle.steps), 1)
+
+
+class TaskDecoratorDelayReturnsChainHandleTest(TestCase):
+
+    def setUp(self):
+        from .tests_tasks import task_a, task_b
+        self.task_a = task_a
+        self.task_b = task_b
+
+    def test_delay_returns_chain_handle(self):
+        handle = self.task_a.delay()
+        self.assertIsInstance(handle, ChainHandle)
+
+    def test_delay_chain_handle_has_task_execution_try(self):
+        handle = self.task_a.delay()
+        self.assertIsNotNone(handle.task_execution_try)
+        from .models import TaskExecutionTry
+        self.assertIsInstance(handle.task_execution_try, TaskExecutionTry)
+
+    def test_delay_then_writes_chain(self):
+        handle = self.task_a.delay()
+        handle.then(self.task_b)
+        handle.task_execution_try.task_execution.refresh_from_db()
+        self.assertEqual(len(handle.task_execution_try.task_execution.chain), 1)
