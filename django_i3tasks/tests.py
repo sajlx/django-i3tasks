@@ -311,9 +311,8 @@ class BuildChainTest(TestCase):
 
     def setUp(self):
         results.clear()
-        from .tests_tasks import task_b, task_c, task_aggregator
+        from .tests_tasks import task_b, task_aggregator
         self.task_b = task_b
-        self.task_c = task_c
         self.task_aggregator = task_aggregator
 
     def test_build_chain_returns_chain_handle_no_dispatch(self):

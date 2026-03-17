@@ -88,14 +88,14 @@ def dispatch_callback(group):
             from django.conf import settings
             if (hasattr(settings, 'I3TASKS') and settings.I3TASKS.force_sync and
                 handle.task_execution_try is not None and handle.task_execution_try.is_success):
+                # In force_sync mode each .delay() blocks until completion,
+                # so the loop executes steps sequentially (not in parallel).
                 for step in group.callback_chain:
                     next_module = importlib.import_module(step['module_name'])
                     next_func = getattr(next_module, step['func_name'])
                     next_args = step.get('args', [])
                     next_kwargs = step.get('kwargs', {})
                     next_func.delay(*next_args, **next_kwargs)
-                    # Note: This executes steps sequentially in force_sync mode
-                    # Further improvements could handle parallel chain steps
         return handle
     except Exception as exc:
         logger.error(

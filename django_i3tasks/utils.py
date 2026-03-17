@@ -610,11 +610,10 @@ class TaskDecorator:
 
     def build_chain(self):
         """Returns a ChainHandle without dispatching. Used to build callback chains for TaskGroup."""
-        import inspect as _inspect
         from .chain import ChainHandle
         func = self._func
         step = {
-            'module_name': _inspect.getmodule(func).__name__,
+            'module_name': inspect.getmodule(func).__name__,
             'func_name': func.__name__,
             'args': [],
             'kwargs': {},
