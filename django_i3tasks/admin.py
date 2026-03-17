@@ -3,6 +3,7 @@ from django.contrib import admin
 from .models import TaskExecution
 from .models import TaskExecutionResult
 from .models import TaskExecutionTry
+from .models import TaskGroup
 
 
 @admin.register(TaskExecution)
@@ -74,3 +75,21 @@ class TaskExecutionResultAdmin(admin.ModelAdmin):
     @admin.display(ordering='task_execution_try__task_execution__task_path', description='Task Path')
     def get_task_path(self, obj):
         return obj.task_execution_try.task_execution.task_path
+
+
+@admin.register(TaskGroup)
+class TaskGroupAdmin(admin.ModelAdmin):
+    list_display = [
+        "id",
+        "callback_task_name",
+        "callback_task_path",
+        "status",
+        "total_count",
+        "completed_count",
+        "failed_count",
+        "created_at",
+    ]
+
+    list_filter = [
+        "status",
+    ]

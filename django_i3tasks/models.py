@@ -93,8 +93,8 @@ class TaskGroup(CreatedUpdatedModel):
     STATUS_SUCCESS = 'success'
     STATUS_FAILED = 'failed'
 
-    callback_task_name = models.CharField(max_length=256)
-    callback_task_path = models.CharField(max_length=256)
+    callback_task_name = models.CharField(max_length=256, null=False, blank=False)
+    callback_task_path = models.CharField(max_length=256, null=False, blank=False)
     callback_task_args = models.JSONField(default=list)
     callback_task_kwargs = models.JSONField(default=dict)
     # callback_chain: remaining chain steps after callback, format: [{module_name, func_name, args, kwargs}]
