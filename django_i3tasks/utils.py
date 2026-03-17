@@ -415,7 +415,6 @@ class TaskObj:
                     task_execution_try=task_execution_try,
                     result=_res_json,
                 ).save()
-            return task_execution_try
         except Exception as e:
             # direct_result = self.sync_run(*args, **kwargs)
             logger.warning(f"Error saving TaskExecutionResult: {e}")
@@ -423,7 +422,27 @@ class TaskObj:
             TaskExecutionResult(
                 task_execution_try=task_execution_try, result=str(direct_result)
             ).save()
-            return task_execution_try
+
+        # --- Chain continuation ---
+        chain = task_execution_try.task_execution.chain
+        if chain:
+            next_step = chain[0]
+            remaining_chain = chain[1:]
+            try:
+                next_module = importlib.import_module(next_step['module_name'])
+                next_func = getattr(next_module, next_step['func_name'])
+                next_args = next_step.get('args', [])
+                next_kwargs = next_step.get('kwargs', {})
+                next_handle = next_func.delay(*next_args, **next_kwargs)
+                if remaining_chain:
+                    next_handle.steps = remaining_chain
+                    next_handle._write_chain_to_db()
+            except Exception as chain_exc:
+                logger.error(f"Chain continuation failed: {chain_exc}", exc_info=True)
+                raise
+        # --- End chain continuation ---
+
+        return task_execution_try
 
 
 class TaskDecorator:

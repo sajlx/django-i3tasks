@@ -2,6 +2,7 @@ from django.test import TestCase
 from .models import TaskGroup
 from .chain import ChainHandle
 from .models import TaskExecution, TaskExecutionTry
+from .tests_tasks import results
 
 
 class TaskGroupModelTest(TestCase):
@@ -141,3 +142,33 @@ class OnSuccessDecoratorTest(TestCase):
         self.assertEqual(len(chain), 2)
         self.assertEqual(chain[0]['func_name'], 'task_b')  # on_success first
         self.assertEqual(chain[1]['func_name'], 'task_c')  # .then() after
+
+
+class ChainContinuationTest(TestCase):
+
+    def setUp(self):
+        results.clear()
+        from .tests_tasks import task_a, task_b, task_c, task_fail
+        self.task_a = task_a
+        self.task_b = task_b
+        self.task_c = task_c
+        self.task_fail = task_fail
+
+    def test_chain_a_then_b_runs_in_order(self):
+        self.task_a.delay().then(self.task_b)
+        self.assertEqual(results, ['a', 'b'])
+
+    def test_chain_a_then_b_then_c(self):
+        self.task_a.delay().then(self.task_b).then(self.task_c)
+        self.assertEqual(results, ['a', 'b', 'c'])
+
+    def test_chain_stops_on_failure(self):
+        try:
+            self.task_fail.delay().then(self.task_b)
+        except Exception:
+            pass
+        self.assertNotIn('b', results)
+
+    def test_chain_retry_safety(self):
+        self.task_a.delay().then(self.task_b)
+        self.assertEqual(results.count('b'), 1)
