@@ -358,6 +358,16 @@ class TaskObj:
                 )
                 return task_execution_try
             else:
+                # Max retries exhausted — mark the group as failed.
+                task_group_id = task_execution_try.task_execution.task_group_id
+                if task_group_id:
+                    from .models import TaskGroup
+                    with transaction.atomic():
+                        group = TaskGroup.objects.select_for_update().get(pk=task_group_id)
+                        if group.status != TaskGroup.STATUS_FAILED:
+                            group.failed_count += 1
+                            group.status = TaskGroup.STATUS_FAILED
+                            group.save()
                 raise MaxRetriesExceededError(f"Max Retries Exceeded: {self}")
             # raise Exception("TaskExecutionTry is not success")
 
@@ -374,7 +384,21 @@ class TaskObj:
 
         self.serialize(*args, **kwargs)
 
-        return self._run_from_db(task_execution_try)
+        try:
+            return self._run_from_db(task_execution_try)
+        except Exception:
+            # In force_sync mode there are no retries, so any exception is final.
+            # Mark the group as failed immediately.
+            task_group_id = task_execution_try.task_execution.task_group_id
+            if task_group_id:
+                from .models import TaskGroup
+                with transaction.atomic():
+                    group = TaskGroup.objects.select_for_update().get(pk=task_group_id)
+                    if group.status != TaskGroup.STATUS_FAILED:
+                        group.failed_count += 1
+                        group.status = TaskGroup.STATUS_FAILED
+                        group.save()
+            raise
 
     def _run_from_db(self, task_execution_try):
 
@@ -397,18 +421,6 @@ class TaskObj:
                 task_execution_try=task_execution_try,
                 result=str(e),
             ).save()
-            # --- Fail group on task exception ---
-            task_group_id = task_execution_try.task_execution.task_group_id
-            if task_group_id:
-                from .models import TaskGroup
-                from django.db import transaction
-                with transaction.atomic():
-                    group = TaskGroup.objects.select_for_update().get(pk=task_group_id)
-                    if group.status != TaskGroup.STATUS_FAILED:
-                        group.failed_count += 1
-                        group.status = TaskGroup.STATUS_FAILED
-                        group.save()
-            # --- End fail group ---
             raise
 
         try:

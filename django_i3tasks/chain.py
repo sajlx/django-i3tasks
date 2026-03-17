@@ -83,6 +83,7 @@ def dispatch_callback(group):
             for step in group.callback_chain:
                 handle._append_raw_step(step)
             handle._write_chain_to_db()
+        return handle
     except Exception as exc:
         logger.error(
             f"dispatch_callback failed for TaskGroup pk={group.pk}: {exc}",
