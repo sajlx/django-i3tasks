@@ -74,7 +74,6 @@ def dispatch_callback(group):
     Fires the callback task stored in group.
     Called when all group members have completed (or when total_count==0).
     """
-    import importlib
     module = importlib.import_module(group.callback_task_path)
     func = getattr(module, group.callback_task_name)
     handle = func.delay(*group.callback_task_args, **group.callback_task_kwargs)

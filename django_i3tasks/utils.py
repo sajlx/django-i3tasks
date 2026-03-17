@@ -234,12 +234,10 @@ class TaskObj:
     def _create_task_db_instance(self, func, task_args=[], task_kwargs={}):
         from .models import TaskGroup
 
-        # Estrai __i3group__ dai kwargs (parametro riservato, non passato alla funzione)
+        # Strip __i3group__ so it is not stored in task_kwargs in the DB or passed to the function.
+        # Only TaskGroup instances are accepted; integer PKs are not supported.
         task_kwargs = dict(task_kwargs)
         task_group = task_kwargs.pop('__i3group__', None)
-        if isinstance(task_group, int):
-            # Supporta anche passare l'ID direttamente
-            task_group = TaskGroup.objects.get(pk=task_group)
 
         func_name = func.__name__
         module_name = inspect.getmodule(func).__name__
@@ -526,7 +524,8 @@ class TaskDecorator:
         return self.async_run(*args, **kwargs)
 
     def async_run(self, *args, **kwargs):
-        # Strip reserved parameter __i3group__ before passing to the actual function
+        # Strip __i3group__ from kwargs passed to the function; TaskObj.__init__ receives
+        # the raw kwargs so _create_task_db_instance can extract the group reference.
         clean_kwargs = {k: v for k, v in kwargs.items() if k != '__i3group__'}
         task_obj = TaskObj(
             func=self._func,

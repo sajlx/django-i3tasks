@@ -218,3 +218,21 @@ class TaskGroupCreateTest(TestCase):
         handle = task_a.delay()
         handle.task_execution_try.task_execution.refresh_from_db()
         self.assertIsNone(handle.task_execution_try.task_execution.task_group)
+
+    def test_create_with_chain_handle(self):
+        from .models import TaskGroup
+        from .tests_tasks import task_aggregator, task_b
+        from .chain import ChainHandle
+
+        # Build a ChainHandle with two steps (aggregator → b)
+        # ChainHandle with task_execution_try=None means build_chain mode (no DB write)
+        handle = ChainHandle(task_execution_try=None)
+        handle.then(task_aggregator)
+        handle.then(task_b)
+
+        group = TaskGroup.create(callback=handle, total_count=2)
+        self.assertEqual(group.callback_task_name, 'task_aggregator')
+        self.assertEqual(group.callback_task_path, 'django_i3tasks.tests_tasks')
+        self.assertEqual(len(group.callback_chain), 1)
+        self.assertEqual(group.callback_chain[0]['func_name'], 'task_b')
+        self.assertEqual(group.total_count, 2)

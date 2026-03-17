@@ -126,6 +126,11 @@ class TaskGroup(CreatedUpdatedModel):
             kwargs = {}
 
         if isinstance(callback, ChainHandle):
+            if args or kwargs:
+                raise ValueError(
+                    "args and kwargs are taken from the ChainHandle steps when callback is a ChainHandle; "
+                    "do not pass them separately."
+                )
             # callback è la testa della chain; remaining è il resto
             if not callback.steps:
                 raise ValueError("ChainHandle passato a TaskGroup.create() non ha step")
