@@ -232,6 +232,14 @@ class TaskObj:
             self.func = func
 
     def _create_task_db_instance(self, func, task_args=[], task_kwargs={}):
+        from .models import TaskGroup
+
+        # Estrai __i3group__ dai kwargs (parametro riservato, non passato alla funzione)
+        task_kwargs = dict(task_kwargs)
+        task_group = task_kwargs.pop('__i3group__', None)
+        if isinstance(task_group, int):
+            # Supporta anche passare l'ID direttamente
+            task_group = TaskGroup.objects.get(pk=task_group)
 
         func_name = func.__name__
         module_name = inspect.getmodule(func).__name__
@@ -241,6 +249,7 @@ class TaskObj:
             task_path=module_name,
             task_args=task_args,
             task_kwargs=task_kwargs,
+            task_group=task_group,
         )
         self.task_execution_db_instance.save()
         self.__popolate_obj_from_db()
@@ -517,6 +526,8 @@ class TaskDecorator:
         return self.async_run(*args, **kwargs)
 
     def async_run(self, *args, **kwargs):
+        # Strip reserved parameter __i3group__ before passing to the actual function
+        clean_kwargs = {k: v for k, v in kwargs.items() if k != '__i3group__'}
         task_obj = TaskObj(
             func=self._func,
             task_args=args,
@@ -527,7 +538,7 @@ class TaskDecorator:
             pubsub_system_utils=self.pubsub_system_utils,
             pubsub_task_utils=self.pubsub_task_utils,
         )
-        handle = task_obj.async_run(*args, **kwargs)
+        handle = task_obj.async_run(*args, **clean_kwargs)
         if self.on_success is not None:
             func = getattr(self.on_success, '_func', self.on_success)
             on_success_step = {

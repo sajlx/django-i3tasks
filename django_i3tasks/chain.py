@@ -67,3 +67,18 @@ class ChainHandle:
         TaskExecution.objects.filter(
             id=self.task_execution_try.task_execution_id
         ).update(chain=self.steps)
+
+
+def dispatch_callback(group):
+    """
+    Fires the callback task stored in group.
+    Called when all group members have completed (or when total_count==0).
+    """
+    import importlib
+    module = importlib.import_module(group.callback_task_path)
+    func = getattr(module, group.callback_task_name)
+    handle = func.delay(*group.callback_task_args, **group.callback_task_kwargs)
+    if group.callback_chain:
+        handle.steps = group.callback_chain
+        handle._write_chain_to_db()
+    return handle

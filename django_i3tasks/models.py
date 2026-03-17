@@ -109,3 +109,54 @@ class TaskGroup(CreatedUpdatedModel):
 
     class Meta:
         indexes = [models.Index(fields=['status'])]
+
+    @classmethod
+    def create(cls, callback, total_count, args=None, kwargs=None):
+        """
+        Factory: crea e salva un TaskGroup.
+        callback: TaskDecorator (deve avere _func e quindi .delay())
+        total_count: numero di task figli attesi. Se 0, dispatch immediato.
+        """
+        import inspect
+        from .chain import ChainHandle
+
+        if args is None:
+            args = []
+        if kwargs is None:
+            kwargs = {}
+
+        if isinstance(callback, ChainHandle):
+            # callback è la testa della chain; remaining è il resto
+            if not callback.steps:
+                raise ValueError("ChainHandle passato a TaskGroup.create() non ha step")
+            head = callback.steps[0]
+            remaining = callback.steps[1:]
+            task_name = head['func_name']
+            task_path = head['module_name']
+            task_args = head.get('args', [])
+            task_kwargs = head.get('kwargs', {})
+            callback_chain = remaining if remaining else None
+        else:
+            func = getattr(callback, '_func', callback)
+            task_name = func.__name__
+            task_path = inspect.getmodule(func).__name__
+            task_args = list(args)
+            task_kwargs = dict(kwargs)
+            callback_chain = None
+
+        group = cls.objects.create(
+            callback_task_name=task_name,
+            callback_task_path=task_path,
+            callback_task_args=task_args,
+            callback_task_kwargs=task_kwargs,
+            callback_chain=callback_chain,
+            total_count=total_count,
+        )
+
+        if total_count == 0:
+            from .chain import dispatch_callback
+            group.status = cls.STATUS_SUCCESS
+            group.save()
+            dispatch_callback(group)
+
+        return group

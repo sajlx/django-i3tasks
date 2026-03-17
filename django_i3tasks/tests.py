@@ -172,3 +172,49 @@ class ChainContinuationTest(TestCase):
     def test_chain_retry_safety(self):
         self.task_a.delay().then(self.task_b)
         self.assertEqual(results.count('b'), 1)
+
+
+class TaskGroupCreateTest(TestCase):
+
+    def setUp(self):
+        results.clear()
+        from .tests_tasks import task_aggregator
+        self.task_aggregator = task_aggregator
+
+    def test_create_with_task_decorator(self):
+        from .models import TaskGroup
+        group = TaskGroup.create(
+            callback=self.task_aggregator,
+            total_count=3,
+        )
+        self.assertIsNotNone(group.pk)
+        self.assertEqual(group.callback_task_name, 'task_aggregator')
+        self.assertEqual(group.callback_task_path, 'django_i3tasks.tests_tasks')
+        self.assertEqual(group.total_count, 3)
+        self.assertEqual(group.status, TaskGroup.STATUS_PENDING)
+
+    def test_create_with_zero_total_count_fires_callback(self):
+        from .models import TaskGroup
+        group = TaskGroup.create(
+            callback=self.task_aggregator,
+            total_count=0,
+        )
+        self.assertEqual(group.status, TaskGroup.STATUS_SUCCESS)
+        self.assertIn('aggregator', results)
+
+    def test_delay_with_i3group_sets_task_group(self):
+        from .models import TaskGroup
+        from .tests_tasks import task_a
+        group = TaskGroup.create(callback=self.task_aggregator, total_count=2)
+        handle = task_a.delay(__i3group__=group)
+        handle.task_execution_try.task_execution.refresh_from_db()
+        self.assertEqual(
+            handle.task_execution_try.task_execution.task_group_id,
+            group.pk,
+        )
+
+    def test_delay_without_i3group_is_standalone(self):
+        from .tests_tasks import task_a
+        handle = task_a.delay()
+        handle.task_execution_try.task_execution.refresh_from_db()
+        self.assertIsNone(handle.task_execution_try.task_execution.task_group)
