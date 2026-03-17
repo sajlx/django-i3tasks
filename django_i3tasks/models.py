@@ -34,6 +34,16 @@ class TaskExecution(CreatedUpdatedModel):
     task_args = models.JSONField(null=False, blank=False, default=list)
     task_kwargs = models.JSONField(null=False, blank=False, default=dict)
 
+    task_group = models.ForeignKey(
+        'TaskGroup',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='members',
+    )
+    chain = models.JSONField(null=True, blank=True)
+    # chain format: [{module_name, func_name, args, kwargs}, ...]
+
     # asked_at = models.DateTimeField(null=False, blank=True)
     # started_at = models.DateTimeField(null=False, blank=True)
     # finished_at = models.DateTimeField(null=False, blank=True)
@@ -74,3 +84,28 @@ class TaskExecutionResult(CreatedUpdatedModel):
     )
 
     result = models.JSONField(null=False, blank=False, default=dict)
+
+
+class TaskGroup(CreatedUpdatedModel):
+    """Coordina N task paralleli verso un callback."""
+
+    STATUS_PENDING = 'pending'
+    STATUS_SUCCESS = 'success'
+    STATUS_FAILED = 'failed'
+
+    callback_task_name = models.CharField(max_length=256)
+    callback_task_path = models.CharField(max_length=256)
+    callback_task_args = models.JSONField(default=list)
+    callback_task_kwargs = models.JSONField(default=dict)
+    # callback_chain: remaining chain steps after callback, format: [{module_name, func_name, args, kwargs}]
+    callback_chain = models.JSONField(null=True, blank=True)
+    # When dispatch_callback fires, TaskExecution.chain is set to callback_chain
+
+    total_count = models.IntegerField()
+    completed_count = models.IntegerField(default=0)
+    failed_count = models.IntegerField(default=0)
+
+    status = models.CharField(max_length=16, default=STATUS_PENDING)
+
+    class Meta:
+        indexes = [models.Index(fields=['status'])]
