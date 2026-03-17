@@ -305,3 +305,32 @@ class JoinTest(TestCase):
         group.refresh_from_db()
         self.assertEqual(group.status, TaskGroup.STATUS_PENDING)
         self.assertNotIn('aggregator', results)
+
+
+class BuildChainTest(TestCase):
+
+    def setUp(self):
+        results.clear()
+        from .tests_tasks import task_b, task_c, task_aggregator
+        self.task_b = task_b
+        self.task_c = task_c
+        self.task_aggregator = task_aggregator
+
+    def test_build_chain_returns_chain_handle_no_dispatch(self):
+        from .chain import ChainHandle
+        from .models import TaskExecution
+        count_before = TaskExecution.objects.count()
+        handle = self.task_aggregator.build_chain().then(self.task_b)
+        count_after = TaskExecution.objects.count()
+        self.assertIsInstance(handle, ChainHandle)
+        self.assertIsNone(handle.task_execution_try)
+        self.assertEqual(count_after, count_before)  # no dispatch
+
+    def test_group_with_chain_callback_fires_full_chain(self):
+        from .models import TaskGroup
+        from .tests_tasks import task_a
+        chain_handle = self.task_aggregator.build_chain().then(self.task_b)
+        group = TaskGroup.create(callback=chain_handle, total_count=1)
+        task_a.delay(__i3group__=group)
+        self.assertIn('aggregator', results)
+        self.assertIn('b', results)

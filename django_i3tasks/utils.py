@@ -608,6 +608,19 @@ class TaskDecorator:
         )
         return task_obj.sync_run(*args, **kwargs)
 
+    def build_chain(self):
+        """Returns a ChainHandle without dispatching. Used to build callback chains for TaskGroup."""
+        import inspect as _inspect
+        from .chain import ChainHandle
+        func = self._func
+        step = {
+            'module_name': _inspect.getmodule(func).__name__,
+            'func_name': func.__name__,
+            'args': [],
+            'kwargs': {},
+        }
+        return ChainHandle(task_execution_try=None, steps=[step])
+
     def __call__(self, *args, **kwargs):
         # When used as @TaskDecorator(on_success=...) the instance is created
         # without a func; calling it with the decorated function finishes setup.

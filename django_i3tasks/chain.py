@@ -83,6 +83,19 @@ def dispatch_callback(group):
             for step in group.callback_chain:
                 handle._append_raw_step(step)
             handle._write_chain_to_db()
+            # In force_sync mode, the task has already executed when func.delay() returns,
+            # so if it succeeded, we need to manually execute the next step in the chain.
+            from django.conf import settings
+            if (hasattr(settings, 'I3TASKS') and settings.I3TASKS.force_sync and
+                handle.task_execution_try is not None and handle.task_execution_try.is_success):
+                for step in group.callback_chain:
+                    next_module = importlib.import_module(step['module_name'])
+                    next_func = getattr(next_module, step['func_name'])
+                    next_args = step.get('args', [])
+                    next_kwargs = step.get('kwargs', {})
+                    next_func.delay(*next_args, **next_kwargs)
+                    # Note: This executes steps sequentially in force_sync mode
+                    # Further improvements could handle parallel chain steps
         return handle
     except Exception as exc:
         logger.error(
