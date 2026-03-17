@@ -387,7 +387,7 @@ class TaskObj:
         args = task_execution_try.task_execution.task_args
         kwargs = task_execution_try.task_execution.task_kwargs
 
-        task_execution_try.started_at_at = datetime.datetime.now(datetime.UTC)
+        task_execution_try.started_at = datetime.datetime.now(datetime.UTC)
         task_execution_try.save()
         direct_result = None
         try:
