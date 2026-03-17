@@ -119,3 +119,25 @@ class TaskDecoratorDelayReturnsChainHandleTest(TestCase):
         handle.then(self.task_b)
         handle.task_execution_try.task_execution.refresh_from_db()
         self.assertEqual(len(handle.task_execution_try.task_execution.chain), 1)
+
+
+class OnSuccessDecoratorTest(TestCase):
+
+    def test_on_success_prepended_to_chain(self):
+        from .tests_tasks import my_task
+
+        handle = my_task.delay()
+        handle.task_execution_try.task_execution.refresh_from_db()
+        chain = handle.task_execution_try.task_execution.chain
+        self.assertEqual(len(chain), 1)
+        self.assertEqual(chain[0]['func_name'], 'task_b')
+
+    def test_on_success_combined_with_then(self):
+        from .tests_tasks import my_task2, task_c
+
+        handle = my_task2.delay().then(task_c)
+        handle.task_execution_try.task_execution.refresh_from_db()
+        chain = handle.task_execution_try.task_execution.chain
+        self.assertEqual(len(chain), 2)
+        self.assertEqual(chain[0]['func_name'], 'task_b')  # on_success first
+        self.assertEqual(chain[1]['func_name'], 'task_c')  # .then() after

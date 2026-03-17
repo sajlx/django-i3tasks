@@ -432,39 +432,26 @@ class TaskDecorator:
 
     def __init__(
         self,
-        func,
+        func=None,
         bind=False,
         project_id=settings.PUBSUB_CONFIG.get("PROJECT_ID", None),
         topic_name=get_default_queue_setting("queue_name", "default"),
         subscription_name=get_default_queue_setting("subscription_name", "default"),
         encoding="utf-8",  # 'utf-32',
         max_retries=settings.I3TASKS.default_max_retries,
+        on_success=None,
     ):
-        functools.update_wrapper(self, func)
         self._func = func
+        self._bind = bind
+        self._project_id = project_id
+        self._topic_name = topic_name
+        self._subscription_name = subscription_name
+        self._encoding = encoding
+        self._max_retries = max_retries
+        self._on_success = on_success
 
-        self.encoding = encoding
-        self.pubsub_system_utils = PubSubSystemUtils(
-            project_id=project_id,
-            topic_name=topic_name,
-            subscription_name=subscription_name,
-            encoding=encoding,
-        )
-        self.pubsub_task_utils = PubSubTaskUtils(
-            system_utils=self.pubsub_system_utils, encoding=encoding
-        )
-
-        self.bind = bind
-        # https://docs.python.org/3/library/codecs.html#standard-encodings
-
-        self.module_name = inspect.getmodule(self._func).__name__
-
-        self.func_name = self._func.__name__
-
-        self.max_retries = max_retries
-
-        self.task_execution = None
-        self.task_execution_try = None
+        if func is not None:
+            self._setup(func)
 
     #     self.get_meta_info()
 
@@ -478,6 +465,34 @@ class TaskDecorator:
     #         "task_execution_try_id": self.task_execution_try.id if self.task_execution_try else None,
     #     }
     #     return self.meta_info
+
+    def _setup(self, func):
+        functools.update_wrapper(self, func)
+        self._func = func
+
+        self.encoding = self._encoding
+        self.pubsub_system_utils = PubSubSystemUtils(
+            project_id=self._project_id,
+            topic_name=self._topic_name,
+            subscription_name=self._subscription_name,
+            encoding=self._encoding,
+        )
+        self.pubsub_task_utils = PubSubTaskUtils(
+            system_utils=self.pubsub_system_utils, encoding=self._encoding
+        )
+
+        self.bind = self._bind
+        # https://docs.python.org/3/library/codecs.html#standard-encodings
+
+        self.module_name = inspect.getmodule(self._func).__name__
+
+        self.func_name = self._func.__name__
+
+        self.max_retries = self._max_retries
+        self.on_success = self._on_success
+
+        self.task_execution = None
+        self.task_execution_try = None
 
     def delay(self, *args, **kwargs):
         return self.async_run(*args, **kwargs)
@@ -493,7 +508,19 @@ class TaskDecorator:
             pubsub_system_utils=self.pubsub_system_utils,
             pubsub_task_utils=self.pubsub_task_utils,
         )
-        return task_obj.async_run(*args, **kwargs)
+        handle = task_obj.async_run(*args, **kwargs)
+        if self.on_success is not None:
+            func = getattr(self.on_success, '_func', self.on_success)
+            on_success_step = {
+                'module_name': inspect.getmodule(func).__name__,
+                'func_name': func.__name__,
+                'args': [],
+                'kwargs': {},
+            }
+            handle.steps.insert(0, on_success_step)
+            if handle.task_execution_try is not None:
+                handle._write_chain_to_db()
+        return handle
 
     def sync_run(self, *args, meta_info=None, **kwargs):
         task_obj = TaskObj(
@@ -509,4 +536,9 @@ class TaskDecorator:
         return task_obj.sync_run(*args, **kwargs)
 
     def __call__(self, *args, **kwargs):
+        # When used as @TaskDecorator(on_success=...) the instance is created
+        # without a func; calling it with the decorated function finishes setup.
+        if self._func is None and len(args) == 1 and callable(args[0]) and not kwargs:
+            self._setup(args[0])
+            return self
         return self.sync_run(*args, **kwargs)

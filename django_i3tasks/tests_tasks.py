@@ -34,3 +34,13 @@ def task_fail(*args, **kwargs):
 def task_aggregator(*args, **kwargs):
     results.append('aggregator')
     return 'result_aggregator'
+
+
+@TaskDecorator(on_success=task_b)
+def my_task(*args, **kwargs):
+    return 'ok'
+
+
+@TaskDecorator(on_success=task_b)
+def my_task2(*args, **kwargs):
+    return 'ok'
