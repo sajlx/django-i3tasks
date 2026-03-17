@@ -236,3 +236,72 @@ class TaskGroupCreateTest(TestCase):
         self.assertEqual(len(group.callback_chain), 1)
         self.assertEqual(group.callback_chain[0]['func_name'], 'task_b')
         self.assertEqual(group.total_count, 2)
+
+
+class JoinTest(TestCase):
+
+    def setUp(self):
+        results.clear()
+        from .tests_tasks import task_a, task_b, task_c, task_fail, task_aggregator
+        self.task_a = task_a
+        self.task_b = task_b
+        self.task_c = task_c
+        self.task_fail = task_fail
+        self.task_aggregator = task_aggregator
+
+    def _create_group(self, total_count):
+        from .models import TaskGroup
+        return TaskGroup.create(callback=self.task_aggregator, total_count=total_count)
+
+    def test_join_all_succeed_fires_callback(self):
+        from .models import TaskGroup
+        group = self._create_group(total_count=2)
+        self.task_a.delay(__i3group__=group)
+        self.task_b.delay(__i3group__=group)
+        group.refresh_from_db()
+        self.assertEqual(group.status, TaskGroup.STATUS_SUCCESS)
+        self.assertIn('aggregator', results)
+
+    def test_join_callback_fires_exactly_once(self):
+        group = self._create_group(total_count=3)
+        self.task_a.delay(__i3group__=group)
+        self.task_b.delay(__i3group__=group)
+        self.task_c.delay(__i3group__=group)
+        self.assertEqual(results.count('aggregator'), 1)
+
+    def test_join_fail_fast_no_callback(self):
+        from .models import TaskGroup
+        group = self._create_group(total_count=2)
+        try:
+            self.task_fail.delay(__i3group__=group)
+        except Exception:
+            pass
+        group.refresh_from_db()
+        self.assertEqual(group.status, TaskGroup.STATUS_FAILED)
+        self.assertNotIn('aggregator', results)
+
+    def test_join_already_failed_guard(self):
+        """Task che completa dopo che il gruppo è già FAILED viene ignorato."""
+        from .models import TaskGroup
+        group = self._create_group(total_count=2)
+        try:
+            self.task_fail.delay(__i3group__=group)
+        except Exception:
+            pass
+        group.refresh_from_db()
+        self.assertEqual(group.status, TaskGroup.STATUS_FAILED)
+        # A second task succeeds — must not change anything
+        self.task_a.delay(__i3group__=group)
+        group.refresh_from_db()
+        self.assertEqual(group.status, TaskGroup.STATUS_FAILED)
+        self.assertNotIn('aggregator', results)
+
+    def test_join_partial_not_fired(self):
+        """Callback non parte finché non completano tutti."""
+        from .models import TaskGroup
+        group = self._create_group(total_count=3)
+        self.task_a.delay(__i3group__=group)
+        self.task_b.delay(__i3group__=group)
+        group.refresh_from_db()
+        self.assertEqual(group.status, TaskGroup.STATUS_PENDING)
+        self.assertNotIn('aggregator', results)

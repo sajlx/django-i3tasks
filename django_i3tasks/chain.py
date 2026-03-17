@@ -71,13 +71,21 @@ class ChainHandle:
 
 def dispatch_callback(group):
     """
-    Fires the callback task stored in group.
-    Called when all group members have completed (or when total_count==0).
+    Dispatches the callback task stored in the group.
+    Called when all group members have completed successfully.
+    group: TaskGroup instance with status SUCCESS.
     """
-    module = importlib.import_module(group.callback_task_path)
-    func = getattr(module, group.callback_task_name)
-    handle = func.delay(*group.callback_task_args, **group.callback_task_kwargs)
-    if group.callback_chain:
-        handle.steps = group.callback_chain
-        handle._write_chain_to_db()
-    return handle
+    try:
+        module = importlib.import_module(group.callback_task_path)
+        func = getattr(module, group.callback_task_name)
+        handle = func.delay(*group.callback_task_args, **group.callback_task_kwargs)
+        if group.callback_chain:
+            for step in group.callback_chain:
+                handle._append_raw_step(step)
+            handle._write_chain_to_db()
+    except Exception as exc:
+        logger.error(
+            f"dispatch_callback failed for TaskGroup pk={group.pk}: {exc}",
+            exc_info=True,
+        )
+        raise

@@ -397,6 +397,18 @@ class TaskObj:
                 task_execution_try=task_execution_try,
                 result=str(e),
             ).save()
+            # --- Fail group on task exception ---
+            task_group_id = task_execution_try.task_execution.task_group_id
+            if task_group_id:
+                from .models import TaskGroup
+                from django.db import transaction
+                with transaction.atomic():
+                    group = TaskGroup.objects.select_for_update().get(pk=task_group_id)
+                    if group.status != TaskGroup.STATUS_FAILED:
+                        group.failed_count += 1
+                        group.status = TaskGroup.STATUS_FAILED
+                        group.save()
+            # --- End fail group ---
             raise
 
         try:
@@ -429,6 +441,26 @@ class TaskObj:
             TaskExecutionResult(
                 task_execution_try=task_execution_try, result=str(direct_result)
             ).save()
+
+        # --- Join group update ---
+        task_group_id = task_execution_try.task_execution.task_group_id
+        if task_group_id:
+            from .models import TaskGroup
+            from .chain import dispatch_callback
+            from django.db import transaction
+
+            should_dispatch = False
+            with transaction.atomic():
+                group = TaskGroup.objects.select_for_update().get(pk=task_group_id)
+                if group.status != TaskGroup.STATUS_FAILED:
+                    group.completed_count += 1
+                    if group.completed_count == group.total_count:
+                        group.status = TaskGroup.STATUS_SUCCESS
+                        should_dispatch = True
+                    group.save()
+            if should_dispatch:
+                dispatch_callback(group)
+        # --- End join group update ---
 
         # --- Chain continuation ---
         chain = task_execution_try.task_execution.chain
