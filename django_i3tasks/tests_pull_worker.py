@@ -198,3 +198,6 @@ class EnsurePubsubWithPullQueueTest(TestCase):
         self.assertTrue(
             any('heavy' in str(c) for c in MockPubSubSystemUtils.call_args_list)
         )
+        # ensure_queue_exists and ensure_subscription were called on the instance
+        mock_utils_instance.ensure_queue_exists.assert_called()
+        mock_utils_instance.ensure_subscription.assert_called()
