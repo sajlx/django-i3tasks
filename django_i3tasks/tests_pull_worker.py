@@ -352,3 +352,40 @@ class WorkerLoopTest(TestCase):
             pass
 
         mock_utils.acknowledge.assert_called_once_with(['ack-123'])
+
+    @patch('django_i3tasks.management.commands.i3tasks_worker.settings')
+    @patch('django_i3tasks.management.commands.i3tasks_worker.PubSubSystemUtils')
+    @patch('django_i3tasks.management.commands.i3tasks_worker.TaskExecutionTry')
+    @patch('django_i3tasks.management.commands.i3tasks_worker.TaskObj')
+    @patch('django_i3tasks.management.commands.i3tasks_worker.importlib')
+    def test_unexpected_exception_is_not_acknowledged(
+        self, mock_importlib, MockTaskObj, MockTry, MockPubSub, mock_settings
+    ):
+        from django_i3tasks.types import PullQueue
+        mock_settings.I3TASKS.default_queue = MagicMock()
+        mock_settings.I3TASKS.default_queue.queue_name = 'default'
+        mock_settings.I3TASKS.other_queues = [PullQueue('heavy', 'heavy-pull')]
+        mock_settings.PUBSUB_CONFIG = {'PROJECT_ID': 'test-project'}
+
+        mock_utils = MagicMock()
+        MockPubSub.return_value = mock_utils
+
+        msg = self._make_message(self._valid_payload())
+        mock_utils.pull_messages.side_effect = [[msg], KeyboardInterrupt]
+
+        mock_task = MagicMock()
+        mock_importlib.import_module.return_value = mock_task
+        MockTry.objects.get.return_value = MagicMock(task_execution_id=1)
+
+        mock_task_obj = MagicMock()
+        mock_task_obj.run_from_async.side_effect = RuntimeError("unexpected infrastructure error")
+        MockTaskObj.return_value = mock_task_obj
+
+        from django_i3tasks.management.commands.i3tasks_worker import Command
+        cmd = Command()
+        try:
+            cmd.handle(queue='heavy')
+        except KeyboardInterrupt:
+            pass
+
+        mock_utils.acknowledge.assert_not_called()

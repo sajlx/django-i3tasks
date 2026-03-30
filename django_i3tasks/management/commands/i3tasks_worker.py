@@ -84,10 +84,10 @@ class Command(BaseCommand):
                     task_obj.run_from_async(
                         task_execution_try_id=meta_info['task_execution_try_id']
                     )
+                    pub_sub.acknowledge([ack_id])
                 except MaxRetriesExceededError:
                     logger.warning(f"Max retries exceeded for message {ack_id}, acknowledging.")
+                    pub_sub.acknowledge([ack_id])
                 except Exception as exc:
                     logger.error(f"Unexpected error processing message {ack_id}: {exc}", exc_info=True)
-
-                # Reached only if deserialization succeeded (the `continue` above skips this)
-                pub_sub.acknowledge([ack_id])
+                    # Do NOT acknowledge — Pub/Sub will redeliver
