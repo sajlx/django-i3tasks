@@ -24,6 +24,7 @@ from .models import TaskExecution
 from .models import TaskExecutionResult
 from .models import TaskExecutionTry
 
+from .chain import ChainHandle
 
 logger = logging.getLogger(__name__)
 
@@ -231,6 +232,12 @@ class TaskObj:
             self.func = func
 
     def _create_task_db_instance(self, func, task_args=[], task_kwargs={}):
+        from .models import TaskGroup
+
+        # Strip __i3group__ so it is not stored in task_kwargs in the DB or passed to the function.
+        # Only TaskGroup instances are accepted; integer PKs are not supported.
+        task_kwargs = dict(task_kwargs)
+        task_group = task_kwargs.pop('__i3group__', None)
 
         func_name = func.__name__
         module_name = inspect.getmodule(func).__name__
@@ -240,6 +247,7 @@ class TaskObj:
             task_path=module_name,
             task_args=task_args,
             task_kwargs=task_kwargs,
+            task_group=task_group,
         )
         self.task_execution_db_instance.save()
         self.__popolate_obj_from_db()
@@ -301,22 +309,9 @@ class TaskObj:
         return self.sync_run(*args, **kwargs)
 
     def async_run(self, *args, **kwargs):
-        # binary_serialized_data = self.serialize(*args, **kwargs)
-        # import ipdb
-        # ipdb.set_trace()
         if settings.I3TASKS.force_sync:
-            # self.serialize(*args, **kwargs)
             task_execution_try = self.sync_run(*args, **kwargs)
-            return task_execution_try
         else:
-            # meta_info = self.get_meta_info()
-            # task_execution, task_execution_try = self._get_or_create_task_execution(
-            #     meta_info=meta_info,
-            #     _args=args,
-            #     _kwargs=kwargs
-            #     # *args,
-            #     # **kwargs
-            # )
             try_obj = self.get_try_obj(
                 task_execution_try_db_instance=None,
                 task_execution_try_id=None,
@@ -324,8 +319,7 @@ class TaskObj:
             )
             task_execution_try = try_obj.task_execution_try_db_instance
             self.enqueue(*args, **kwargs)
-            return task_execution_try
-        # self._run(*args, **kwargs)
+        return ChainHandle(task_execution_try=task_execution_try, steps=[])
 
     def run_from_async(
         self, task_execution_try_db_instance=None, task_execution_try_id=None
@@ -364,6 +358,16 @@ class TaskObj:
                 )
                 return task_execution_try
             else:
+                # Max retries exhausted — mark the group as failed.
+                task_group_id = task_execution_try.task_execution.task_group_id
+                if task_group_id:
+                    from .models import TaskGroup
+                    with transaction.atomic():
+                        group = TaskGroup.objects.select_for_update().get(pk=task_group_id)
+                        if group.status != TaskGroup.STATUS_FAILED:
+                            group.failed_count += 1
+                            group.status = TaskGroup.STATUS_FAILED
+                            group.save()
                 raise MaxRetriesExceededError(f"Max Retries Exceeded: {self}")
             # raise Exception("TaskExecutionTry is not success")
 
@@ -380,14 +384,28 @@ class TaskObj:
 
         self.serialize(*args, **kwargs)
 
-        return self._run_from_db(task_execution_try)
+        try:
+            return self._run_from_db(task_execution_try)
+        except Exception:
+            # In force_sync mode there are no retries, so any exception is final.
+            # Mark the group as failed immediately.
+            task_group_id = task_execution_try.task_execution.task_group_id
+            if task_group_id:
+                from .models import TaskGroup
+                with transaction.atomic():
+                    group = TaskGroup.objects.select_for_update().get(pk=task_group_id)
+                    if group.status != TaskGroup.STATUS_FAILED:
+                        group.failed_count += 1
+                        group.status = TaskGroup.STATUS_FAILED
+                        group.save()
+            raise
 
     def _run_from_db(self, task_execution_try):
 
         args = task_execution_try.task_execution.task_args
         kwargs = task_execution_try.task_execution.task_kwargs
 
-        task_execution_try.started_at_at = datetime.datetime.now(datetime.UTC)
+        task_execution_try.started_at = datetime.datetime.now(datetime.UTC)
         task_execution_try.save()
         direct_result = None
         try:
@@ -428,7 +446,6 @@ class TaskObj:
                     task_execution_try=task_execution_try,
                     result=_res_json,
                 ).save()
-            return task_execution_try
         except Exception as e:
             # direct_result = self.sync_run(*args, **kwargs)
             logger.warning(f"Error saving TaskExecutionResult: {e}")
@@ -436,7 +453,47 @@ class TaskObj:
             TaskExecutionResult(
                 task_execution_try=task_execution_try, result=str(direct_result)
             ).save()
-            return task_execution_try
+
+        # --- Join group update ---
+        task_group_id = task_execution_try.task_execution.task_group_id
+        if task_group_id:
+            from .models import TaskGroup
+            from .chain import dispatch_callback
+            from django.db import transaction
+
+            should_dispatch = False
+            with transaction.atomic():
+                group = TaskGroup.objects.select_for_update().get(pk=task_group_id)
+                if group.status != TaskGroup.STATUS_FAILED:
+                    group.completed_count += 1
+                    if group.completed_count == group.total_count:
+                        group.status = TaskGroup.STATUS_SUCCESS
+                        should_dispatch = True
+                    group.save()
+            if should_dispatch:
+                dispatch_callback(group)
+        # --- End join group update ---
+
+        # --- Chain continuation ---
+        chain = task_execution_try.task_execution.chain
+        if chain:
+            next_step = chain[0]
+            remaining_chain = chain[1:]
+            try:
+                next_module = importlib.import_module(next_step['module_name'])
+                next_func = getattr(next_module, next_step['func_name'])
+                next_args = next_step.get('args', [])
+                next_kwargs = next_step.get('kwargs', {})
+                next_handle = next_func.delay(*next_args, **next_kwargs)
+                if remaining_chain:
+                    next_handle.steps = remaining_chain
+                    next_handle._write_chain_to_db()
+            except Exception as chain_exc:
+                logger.error(f"Chain continuation failed: {chain_exc}", exc_info=True)
+                raise
+        # --- End chain continuation ---
+
+        return task_execution_try
 
 
 class TaskDecorator:
@@ -445,39 +502,26 @@ class TaskDecorator:
 
     def __init__(
         self,
-        func,
+        func=None,
         bind=False,
         project_id=settings.PUBSUB_CONFIG.get("PROJECT_ID", None),
         topic_name=get_default_queue_setting("queue_name", "default"),
         subscription_name=get_default_queue_setting("subscription_name", "default"),
         encoding="utf-8",  # 'utf-32',
         max_retries=settings.I3TASKS.default_max_retries,
+        on_success=None,
     ):
-        functools.update_wrapper(self, func)
         self._func = func
+        self._bind = bind
+        self._project_id = project_id
+        self._topic_name = topic_name
+        self._subscription_name = subscription_name
+        self._encoding = encoding
+        self._max_retries = max_retries
+        self._on_success = on_success
 
-        self.encoding = encoding
-        self.pubsub_system_utils = PubSubSystemUtils(
-            project_id=project_id,
-            topic_name=topic_name,
-            subscription_name=subscription_name,
-            encoding=encoding,
-        )
-        self.pubsub_task_utils = PubSubTaskUtils(
-            system_utils=self.pubsub_system_utils, encoding=encoding
-        )
-
-        self.bind = bind
-        # https://docs.python.org/3/library/codecs.html#standard-encodings
-
-        self.module_name = inspect.getmodule(self._func).__name__
-
-        self.func_name = self._func.__name__
-
-        self.max_retries = max_retries
-
-        self.task_execution = None
-        self.task_execution_try = None
+        if func is not None:
+            self._setup(func)
 
     #     self.get_meta_info()
 
@@ -492,10 +536,41 @@ class TaskDecorator:
     #     }
     #     return self.meta_info
 
+    def _setup(self, func):
+        functools.update_wrapper(self, func)
+        self._func = func
+
+        self.encoding = self._encoding
+        self.pubsub_system_utils = PubSubSystemUtils(
+            project_id=self._project_id,
+            topic_name=self._topic_name,
+            subscription_name=self._subscription_name,
+            encoding=self._encoding,
+        )
+        self.pubsub_task_utils = PubSubTaskUtils(
+            system_utils=self.pubsub_system_utils, encoding=self._encoding
+        )
+
+        self.bind = self._bind
+        # https://docs.python.org/3/library/codecs.html#standard-encodings
+
+        self.module_name = inspect.getmodule(self._func).__name__
+
+        self.func_name = self._func.__name__
+
+        self.max_retries = self._max_retries
+        self.on_success = self._on_success
+
+        self.task_execution = None
+        self.task_execution_try = None
+
     def delay(self, *args, **kwargs):
         return self.async_run(*args, **kwargs)
 
     def async_run(self, *args, **kwargs):
+        # Strip __i3group__ from kwargs passed to the function; TaskObj.__init__ receives
+        # the raw kwargs so _create_task_db_instance can extract the group reference.
+        clean_kwargs = {k: v for k, v in kwargs.items() if k != '__i3group__'}
         task_obj = TaskObj(
             func=self._func,
             task_args=args,
@@ -506,7 +581,19 @@ class TaskDecorator:
             pubsub_system_utils=self.pubsub_system_utils,
             pubsub_task_utils=self.pubsub_task_utils,
         )
-        return task_obj.async_run(*args, **kwargs)
+        handle = task_obj.async_run(*args, **clean_kwargs)
+        if self.on_success is not None:
+            func = getattr(self.on_success, '_func', self.on_success)
+            on_success_step = {
+                'module_name': inspect.getmodule(func).__name__,
+                'func_name': func.__name__,
+                'args': [],
+                'kwargs': {},
+            }
+            handle.steps.insert(0, on_success_step)
+            if handle.task_execution_try is not None:
+                handle._write_chain_to_db()
+        return handle
 
     def sync_run(self, *args, meta_info=None, **kwargs):
         task_obj = TaskObj(
@@ -521,5 +608,22 @@ class TaskDecorator:
         )
         return task_obj.sync_run(*args, **kwargs)
 
+    def build_chain(self):
+        """Returns a ChainHandle without dispatching. Used to build callback chains for TaskGroup."""
+        from .chain import ChainHandle
+        func = self._func
+        step = {
+            'module_name': inspect.getmodule(func).__name__,
+            'func_name': func.__name__,
+            'args': [],
+            'kwargs': {},
+        }
+        return ChainHandle(task_execution_try=None, steps=[step])
+
     def __call__(self, *args, **kwargs):
+        # When used as @TaskDecorator(on_success=...) the instance is created
+        # without a func; calling it with the decorated function finishes setup.
+        if self._func is None and len(args) == 1 and callable(args[0]) and not kwargs:
+            self._setup(args[0])
+            return self
         return self.sync_run(*args, **kwargs)

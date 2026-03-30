@@ -14,6 +14,7 @@ from google.cloud import pubsub_v1
 from django.conf import settings
 
 from django_i3tasks.types import I3TasksSettings
+from django_i3tasks.types import PullQueue
 from django_i3tasks.types import Queue
 
 
@@ -210,35 +211,52 @@ class PubSubSystemUtils:
         subscriber = self.get_subscription_client()
         topic_name = self.get_topic_name()
         subscription_name = self.get_subscription_name()
-        _endpoint = endpoint
 
-        if not _endpoint:
-            default_queue = I3TASKS.default_queue
-            if topic_name == default_queue.queue_name:
-                _endpoint = default_queue.push_endpoint
-            else:
-                queue: Queue =  None
-                for _queue in I3TASKS.other_queues:
-                    if topic_name == _queue.queue_name:
-                        queue = _queue
-                if queue is not None:
-                    _endpoint = queue.push_endpoint
-                else:
-                    _endpoint = default_queue.push_endpoint
+        # Find the queue matching this topic_name (self.topic_name is the queue_name)
+        all_queues = list(I3TASKS.other_queues) + [I3TASKS.default_queue]
+        matched_queue = next(
+            (q for q in all_queues if q.queue_name == self.topic_name),
+            I3TASKS.default_queue,
+        )
 
         try:
-            subscriber.create_subscription(
-                name=subscription_name,
-                topic=topic_name,
-                push_config=pubsub_v1.types.PushConfig(
-                    push_endpoint=_endpoint
-                ),
-            )
-            # future = subscriber.subscribe(subscription_name, callback)
+            if isinstance(matched_queue, PullQueue):
+                subscriber.create_subscription(
+                    name=subscription_name,
+                    topic=topic_name,
+                )
+            else:
+                _endpoint = endpoint or matched_queue.push_endpoint
+                subscriber.create_subscription(
+                    name=subscription_name,
+                    topic=topic_name,
+                    push_config=pubsub_v1.types.PushConfig(push_endpoint=_endpoint),
+                )
         except google.api_core.exceptions.AlreadyExists:
             logger.info(f"Subscription {subscription_name} already exists")
-            self._queue_already_exists = True
+            self._subscription_already_exists = True
 
     def ensure_subscription(self, endpoint=None, force_check=False):
         if not self.subscription_already_exists(force_check):
             self.create_subscription()
+
+    def pull_messages(self, max_messages=1):
+        subscriber = self.get_subscription_client()
+        subscription_name = self.get_subscription_name()
+        response = subscriber.pull(
+            request={
+                'subscription': subscription_name,
+                'max_messages': max_messages,
+            }
+        )
+        return list(response.received_messages)
+
+    def acknowledge(self, ack_ids):
+        subscriber = self.get_subscription_client()
+        subscription_name = self.get_subscription_name()
+        subscriber.acknowledge(
+            request={
+                'subscription': subscription_name,
+                'ack_ids': ack_ids,
+            }
+        )

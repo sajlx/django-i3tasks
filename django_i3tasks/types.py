@@ -1,20 +1,19 @@
 
 from collections import namedtuple
-# from typing import NamedTuple
-
-# class Person(NamedTuple):
-#     name: str
-#     age: int
-#     height: float
-#     weight: float
-#     country: str = "Canada"
 
 
-Queue = namedtuple('Queue', [
+PushQueue = namedtuple('PushQueue', [
     'queue_name',
     'subscription_name',
-    'push_endpoint'
+    'push_endpoint',
 ])
+
+PullQueue = namedtuple('PullQueue', [
+    'queue_name',
+    'subscription_name',
+])
+
+Queue = PushQueue  # backward-compatible alias
 
 
 Schedule = namedtuple('Schedule', [
@@ -66,8 +65,8 @@ class I3TasksSettings():
     def __init__(
             self,
             namespace: str,
-            default_queue: Queue,
-            other_queues: 'tuple[Queue, ...]',
+            default_queue: PushQueue,
+            other_queues: 'tuple[PushQueue | PullQueue, ...]',
             schedules: 'tuple[Schedule, ...]',
             force_sync: bool = False,
             default_max_retries: int = 3,
