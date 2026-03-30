@@ -10,11 +10,18 @@ from collections import namedtuple
 #     country: str = "Canada"
 
 
-Queue = namedtuple('Queue', [
+PushQueue = namedtuple('PushQueue', [
     'queue_name',
     'subscription_name',
-    'push_endpoint'
+    'push_endpoint',
 ])
+
+PullQueue = namedtuple('PullQueue', [
+    'queue_name',
+    'subscription_name',
+])
+
+Queue = PushQueue  # backward-compatible alias
 
 
 Schedule = namedtuple('Schedule', [
