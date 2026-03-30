@@ -43,7 +43,7 @@ from django_i3tasks.queue_manager.google_pubsub import PubSubSystemUtils
 class CreateSubscriptionTest(TestCase):
 
     def _make_system_utils(self, topic_name='heavy', subscription_name='heavy-pull'):
-        with patch.object(PubSubSystemUtils, '__init__', lambda self, **kw: None):
+        with patch.object(PubSubSystemUtils, '__init__', lambda self, *args, **kw: None):
             utils = PubSubSystemUtils.__new__(PubSubSystemUtils)
         utils.project_id = 'test-project'
         utils.topic_name = topic_name
