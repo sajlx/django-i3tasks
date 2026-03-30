@@ -239,3 +239,24 @@ class PubSubSystemUtils:
     def ensure_subscription(self, endpoint=None, force_check=False):
         if not self.subscription_already_exists(force_check):
             self.create_subscription()
+
+    def pull_messages(self, max_messages=1):
+        subscriber = self.get_subscription_client()
+        subscription_name = self.get_subscription_name()
+        response = subscriber.pull(
+            request={
+                'subscription': subscription_name,
+                'max_messages': max_messages,
+            }
+        )
+        return list(response.received_messages)
+
+    def acknowledge(self, ack_ids):
+        subscriber = self.get_subscription_client()
+        subscription_name = self.get_subscription_name()
+        subscriber.acknowledge(
+            request={
+                'subscription': subscription_name,
+                'ack_ids': ack_ids,
+            }
+        )

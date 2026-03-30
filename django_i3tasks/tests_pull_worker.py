@@ -103,3 +103,67 @@ class CreateSubscriptionTest(TestCase):
 
         call_kwargs = mock_subscriber.create_subscription.call_args[1]
         self.assertIsNotNone(call_kwargs.get('push_config'))
+
+
+class PullMessagesAcknowledgeTest(TestCase):
+
+    def _make_system_utils(self, topic_name='heavy', subscription_name='heavy-pull'):
+        with patch.object(PubSubSystemUtils, '__init__', lambda self, *args, **kw: None):
+            utils = PubSubSystemUtils.__new__(PubSubSystemUtils)
+        utils.project_id = 'test-project'
+        utils.topic_name = topic_name
+        utils.subscription_name = subscription_name
+        utils.namespace = 'tasks.test'
+        utils.encoding = 'utf-8'
+        utils._publisher_client = None
+        utils._subscription_client = None
+        utils._queue_already_exists = None
+        utils._subscription_already_exists = None
+        return utils
+
+    def test_pull_messages_calls_subscriber_pull(self):
+        utils = self._make_system_utils()
+        mock_subscriber = MagicMock()
+        mock_subscriber.subscription_path.return_value = 'projects/test-project/subscriptions/tasks.test.heavy.heavy-pull'
+        mock_response = MagicMock()
+        mock_response.received_messages = [MagicMock(), MagicMock()]
+        mock_subscriber.pull.return_value = mock_response
+        utils._subscription_client = mock_subscriber
+
+        messages = utils.pull_messages(max_messages=2)
+
+        mock_subscriber.pull.assert_called_once_with(
+            request={
+                'subscription': 'projects/test-project/subscriptions/tasks.test.heavy.heavy-pull',
+                'max_messages': 2,
+            }
+        )
+        self.assertEqual(len(messages), 2)
+
+    def test_pull_messages_returns_empty_list_when_no_messages(self):
+        utils = self._make_system_utils()
+        mock_subscriber = MagicMock()
+        mock_subscriber.subscription_path.return_value = 'projects/test-project/subscriptions/tasks.test.heavy.heavy-pull'
+        mock_response = MagicMock()
+        mock_response.received_messages = []
+        mock_subscriber.pull.return_value = mock_response
+        utils._subscription_client = mock_subscriber
+
+        messages = utils.pull_messages()
+
+        self.assertEqual(messages, [])
+
+    def test_acknowledge_calls_subscriber_acknowledge(self):
+        utils = self._make_system_utils()
+        mock_subscriber = MagicMock()
+        mock_subscriber.subscription_path.return_value = 'projects/test-project/subscriptions/tasks.test.heavy.heavy-pull'
+        utils._subscription_client = mock_subscriber
+
+        utils.acknowledge(['ack-id-1', 'ack-id-2'])
+
+        mock_subscriber.acknowledge.assert_called_once_with(
+            request={
+                'subscription': 'projects/test-project/subscriptions/tasks.test.heavy.heavy-pull',
+                'ack_ids': ['ack-id-1', 'ack-id-2'],
+            }
+        )
