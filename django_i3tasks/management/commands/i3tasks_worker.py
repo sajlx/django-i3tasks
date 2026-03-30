@@ -50,44 +50,48 @@ class Command(BaseCommand):
         logger.info(f"Starting pull worker for queue '{queue_name}' (subscription: {matched_queue.subscription_name})")
         self.stdout.write(f"Pull worker started for queue '{queue_name}'. Press Ctrl+C to stop.")
 
-        while True:
-            messages = pub_sub.pull_messages(max_messages=1)
+        try:
+            while True:
+                messages = pub_sub.pull_messages(max_messages=1)
 
-            if not messages:
-                time.sleep(1)
-                continue
-
-            for received_message in messages:
-                ack_id = received_message.ack_id
-                try:
-                    data = json.loads(received_message.message.data.decode('utf-8'))
-                    meta_info = data['meta_info']
-                except (json.JSONDecodeError, KeyError, UnicodeDecodeError) as exc:
-                    logger.error(f"Failed to deserialize message {ack_id}: {exc}")
-                    # Do not ack — Pub/Sub will redeliver
+                if not messages:
+                    time.sleep(1)
                     continue
 
-                try:
-                    task_module = importlib.import_module(meta_info['module_name'])
-                    task = getattr(task_module, meta_info['func_name'])
+                for received_message in messages:
+                    ack_id = received_message.ack_id
+                    try:
+                        data = json.loads(received_message.message.data.decode('utf-8'))
+                        meta_info = data['meta_info']
+                    except (json.JSONDecodeError, KeyError, UnicodeDecodeError) as exc:
+                        logger.error(f"Failed to deserialize message {ack_id}: {exc}")
+                        # Do not ack — Pub/Sub will redeliver
+                        continue
 
-                    task_execution_try = TaskExecutionTry.objects.get(
-                        id=meta_info['task_execution_try_id']
-                    )
-                    task_obj = TaskObj(
-                        task_execution_id=task_execution_try.task_execution_id,
-                        encoding=task.encoding,
-                        max_retries=task.max_retries,
-                        pubsub_system_utils=task.pubsub_system_utils,
-                        pubsub_task_utils=task.pubsub_task_utils,
-                    )
-                    task_obj.run_from_async(
-                        task_execution_try_id=meta_info['task_execution_try_id']
-                    )
-                    pub_sub.acknowledge([ack_id])
-                except MaxRetriesExceededError:
-                    logger.warning(f"Max retries exceeded for message {ack_id}, acknowledging.")
-                    pub_sub.acknowledge([ack_id])
-                except Exception as exc:
-                    logger.error(f"Unexpected error processing message {ack_id}: {exc}", exc_info=True)
-                    # Do NOT acknowledge — Pub/Sub will redeliver
+                    try:
+                        task_module = importlib.import_module(meta_info['module_name'])
+                        task = getattr(task_module, meta_info['func_name'])
+
+                        task_execution_try = TaskExecutionTry.objects.get(
+                            id=meta_info['task_execution_try_id']
+                        )
+                        task_obj = TaskObj(
+                            task_execution_id=task_execution_try.task_execution_id,
+                            encoding=task.encoding,
+                            max_retries=task.max_retries,
+                            pubsub_system_utils=task.pubsub_system_utils,
+                            pubsub_task_utils=task.pubsub_task_utils,
+                        )
+                        task_obj.run_from_async(
+                            task_execution_try_id=meta_info['task_execution_try_id']
+                        )
+                        pub_sub.acknowledge([ack_id])
+                    except MaxRetriesExceededError:
+                        logger.warning(f"Max retries exceeded for message {ack_id}, acknowledging.")
+                        pub_sub.acknowledge([ack_id])
+                    except Exception as exc:
+                        logger.error(f"Unexpected error processing message {ack_id}: {exc}", exc_info=True)
+                        # Do NOT acknowledge — Pub/Sub will redeliver
+        except KeyboardInterrupt:
+            logger.info(f"Pull worker for queue '{queue_name}' stopped.")
+            self.stdout.write("Worker stopped.")
