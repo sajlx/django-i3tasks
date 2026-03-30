@@ -73,22 +73,12 @@ class Command(BaseCommand):
         except Exception as exc:
             logger.exception(exc)
             logger.error(f"Error on ensure default queue")
-            return CommandError()
+            raise CommandError("Failed to ensure default queue") from exc
 
 
         for queue in settings.I3TASKS.other_queues:
-            queue_name = None
-            subscription_name = None
-            push_endpoint = None
-
-            try:
-                queue_name = queue.queue_name
-                subscription_name = queue.subscription_name
-                push_endpoint = queue.push_endpoint
-            except Exception as exc:
-                logger.error(f"Error on getting params of other {queue_name} queue")
-                logger.exception(exc)
-                return CommandError()
+            queue_name = queue.queue_name
+            subscription_name = queue.subscription_name
 
             try:
                 pub_sub_system_utils = PubSubSystemUtils(
@@ -96,11 +86,12 @@ class Command(BaseCommand):
                     subscription_name=subscription_name,
                 )
                 pub_sub_system_utils.ensure_queue_exists()
-                pub_sub_system_utils.ensure_subscription(push_endpoint)
+                pub_sub_system_utils.ensure_subscription()
+                # create_subscription() resolves push vs pull internally via self.topic_name
             except Exception as exc:
                 logger.error(f"Error on ensure {queue_name} queue")
                 logger.exception(exc)
-                return CommandError()
+                raise CommandError(f"Failed to ensure queue {queue_name}") from exc
 
             # {
             #     "QUEUE_NAME": 'default',

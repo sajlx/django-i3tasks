@@ -167,3 +167,34 @@ class PullMessagesAcknowledgeTest(TestCase):
                 'ack_ids': ['ack-id-1', 'ack-id-2'],
             }
         )
+
+
+from django.core.management import call_command
+from io import StringIO
+
+
+class EnsurePubsubWithPullQueueTest(TestCase):
+
+    @patch('django_i3tasks.management.commands.i3tasks_ensure_pubsub.PubSubSystemUtils')
+    @patch('django_i3tasks.management.commands.i3tasks_ensure_pubsub.settings')
+    def test_ensure_pubsub_handles_pullqueue_in_other_queues(self, mock_settings, MockPubSubSystemUtils):
+        from django_i3tasks.types import PushQueue, PullQueue
+        mock_settings.I3TASKS.default_queue = PushQueue('default', 'default', 'http://host/push/')
+        mock_settings.I3TASKS.other_queues = [
+            PullQueue('heavy', 'heavy-pull'),
+        ]
+
+        mock_utils_instance = MagicMock()
+        MockPubSubSystemUtils.return_value = mock_utils_instance
+
+        # Should not raise AttributeError
+        out = StringIO()
+        try:
+            call_command('i3tasks_ensure_pubsub', stdout=out)
+        except SystemExit:
+            pass
+
+        # PubSubSystemUtils was instantiated for the pull queue
+        self.assertTrue(
+            any('heavy' in str(c) for c in MockPubSubSystemUtils.call_args_list)
+        )
