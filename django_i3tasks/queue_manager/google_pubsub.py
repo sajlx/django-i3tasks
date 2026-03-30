@@ -14,6 +14,7 @@ from google.cloud import pubsub_v1
 from django.conf import settings
 
 from django_i3tasks.types import I3TasksSettings
+from django_i3tasks.types import PullQueue
 from django_i3tasks.types import Queue
 
 
@@ -206,7 +207,6 @@ class PubSubSystemUtils:
         return self._subscription_already_exists
 
     def create_subscription(self, endpoint=None):
-        from django_i3tasks.types import PullQueue
         I3TASKS: I3TasksSettings = settings.I3TASKS
         subscriber = self.get_subscription_client()
         topic_name = self.get_topic_name()
