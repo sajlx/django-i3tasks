@@ -1,13 +1,5 @@
 
 from collections import namedtuple
-# from typing import NamedTuple
-
-# class Person(NamedTuple):
-#     name: str
-#     age: int
-#     height: float
-#     weight: float
-#     country: str = "Canada"
 
 
 PushQueue = namedtuple('PushQueue', [
@@ -73,8 +65,8 @@ class I3TasksSettings():
     def __init__(
             self,
             namespace: str,
-            default_queue: Queue,
-            other_queues: 'tuple[Queue, ...]',
+            default_queue: PushQueue,
+            other_queues: 'tuple[PushQueue | PullQueue, ...]',
             schedules: 'tuple[Schedule, ...]',
             force_sync: bool = False,
             default_max_retries: int = 3,
