@@ -201,3 +201,154 @@ class EnsurePubsubWithPullQueueTest(TestCase):
         # ensure_queue_exists and ensure_subscription were called on the instance
         mock_utils_instance.ensure_queue_exists.assert_called()
         mock_utils_instance.ensure_subscription.assert_called()
+
+
+from django.core.management.base import CommandError
+
+
+class WorkerCommandValidationTest(TestCase):
+
+    @patch('django_i3tasks.management.commands.i3tasks_worker.settings')
+    def test_unknown_queue_raises_command_error(self, mock_settings):
+        from django_i3tasks.types import PushQueue
+        mock_settings.I3TASKS.default_queue = PushQueue('default', 'default', 'http://host/')
+        mock_settings.I3TASKS.other_queues = []
+
+        from django_i3tasks.management.commands.i3tasks_worker import Command
+        cmd = Command()
+        with self.assertRaises(CommandError):
+            cmd.handle(queue='nonexistent')
+
+    @patch('django_i3tasks.management.commands.i3tasks_worker.settings')
+    def test_pushqueue_raises_command_error(self, mock_settings):
+        from django_i3tasks.types import PushQueue
+        mock_settings.I3TASKS.default_queue = PushQueue('default', 'default', 'http://host/')
+        mock_settings.I3TASKS.other_queues = []
+
+        from django_i3tasks.management.commands.i3tasks_worker import Command
+        cmd = Command()
+        with self.assertRaises(CommandError):
+            cmd.handle(queue='default')  # default is a PushQueue
+
+
+class WorkerLoopTest(TestCase):
+
+    def _make_message(self, payload_dict, ack_id='ack-123'):
+        import json
+        msg = MagicMock()
+        msg.ack_id = ack_id
+        msg.message.data = json.dumps(payload_dict).encode('utf-8')
+        return msg
+
+    def _valid_payload(self, task_execution_try_id=1):
+        return {
+            'args': [],
+            'kwargs': {},
+            'meta_info': {
+                'module_name': 'django_i3tasks.tests_tasks',
+                'func_name': 'task_a',
+                'task_execution_try_id': task_execution_try_id,
+                'task_execution_id': 1,
+                'bind': False,
+                'encoding': 'utf-8',
+            }
+        }
+
+    @patch('django_i3tasks.management.commands.i3tasks_worker.settings')
+    @patch('django_i3tasks.management.commands.i3tasks_worker.PubSubSystemUtils')
+    @patch('django_i3tasks.management.commands.i3tasks_worker.TaskExecutionTry')
+    @patch('django_i3tasks.management.commands.i3tasks_worker.TaskObj')
+    @patch('django_i3tasks.management.commands.i3tasks_worker.importlib')
+    def test_successful_task_is_acknowledged(
+        self, mock_importlib, MockTaskObj, MockTry, MockPubSub, mock_settings
+    ):
+        from django_i3tasks.types import PullQueue
+        mock_settings.I3TASKS.default_queue = MagicMock()
+        mock_settings.I3TASKS.default_queue.queue_name = 'default'
+        mock_settings.I3TASKS.other_queues = [PullQueue('heavy', 'heavy-pull')]
+        mock_settings.PUBSUB_CONFIG = {'PROJECT_ID': 'test-project'}
+
+        mock_utils = MagicMock()
+        MockPubSub.return_value = mock_utils
+
+        msg = self._make_message(self._valid_payload())
+        # First call returns one message, second raises KeyboardInterrupt to exit loop
+        mock_utils.pull_messages.side_effect = [[msg], KeyboardInterrupt]
+
+        mock_task = MagicMock()
+        mock_importlib.import_module.return_value = mock_task
+        MockTry.objects.get.return_value = MagicMock(task_execution_id=1)
+
+        from django_i3tasks.management.commands.i3tasks_worker import Command
+        cmd = Command()
+        try:
+            cmd.handle(queue='heavy')
+        except KeyboardInterrupt:
+            pass
+
+        mock_utils.acknowledge.assert_called_once_with(['ack-123'])
+
+    @patch('django_i3tasks.management.commands.i3tasks_worker.settings')
+    @patch('django_i3tasks.management.commands.i3tasks_worker.PubSubSystemUtils')
+    def test_malformed_message_is_not_acknowledged(self, MockPubSub, mock_settings):
+        from django_i3tasks.types import PullQueue
+        mock_settings.I3TASKS.default_queue = MagicMock()
+        mock_settings.I3TASKS.default_queue.queue_name = 'default'
+        mock_settings.I3TASKS.other_queues = [PullQueue('heavy', 'heavy-pull')]
+        mock_settings.PUBSUB_CONFIG = {'PROJECT_ID': 'test-project'}
+
+        mock_utils = MagicMock()
+        MockPubSub.return_value = mock_utils
+
+        bad_msg = MagicMock()
+        bad_msg.ack_id = 'ack-bad'
+        bad_msg.message.data = b'not valid json{'
+
+        mock_utils.pull_messages.side_effect = [[bad_msg], KeyboardInterrupt]
+
+        from django_i3tasks.management.commands.i3tasks_worker import Command
+        cmd = Command()
+        try:
+            cmd.handle(queue='heavy')
+        except KeyboardInterrupt:
+            pass
+
+        mock_utils.acknowledge.assert_not_called()
+
+    @patch('django_i3tasks.management.commands.i3tasks_worker.settings')
+    @patch('django_i3tasks.management.commands.i3tasks_worker.PubSubSystemUtils')
+    @patch('django_i3tasks.management.commands.i3tasks_worker.TaskExecutionTry')
+    @patch('django_i3tasks.management.commands.i3tasks_worker.TaskObj')
+    @patch('django_i3tasks.management.commands.i3tasks_worker.importlib')
+    def test_max_retries_exceeded_is_acknowledged(
+        self, mock_importlib, MockTaskObj, MockTry, MockPubSub, mock_settings
+    ):
+        from django_i3tasks.types import PullQueue
+        from django_i3tasks.exceptions import MaxRetriesExceededError
+        mock_settings.I3TASKS.default_queue = MagicMock()
+        mock_settings.I3TASKS.default_queue.queue_name = 'default'
+        mock_settings.I3TASKS.other_queues = [PullQueue('heavy', 'heavy-pull')]
+        mock_settings.PUBSUB_CONFIG = {'PROJECT_ID': 'test-project'}
+
+        mock_utils = MagicMock()
+        MockPubSub.return_value = mock_utils
+
+        msg = self._make_message(self._valid_payload())
+        mock_utils.pull_messages.side_effect = [[msg], KeyboardInterrupt]
+
+        mock_task = MagicMock()
+        mock_importlib.import_module.return_value = mock_task
+        MockTry.objects.get.return_value = MagicMock(task_execution_id=1)
+
+        mock_task_obj = MagicMock()
+        mock_task_obj.run_from_async.side_effect = MaxRetriesExceededError("max retries")
+        MockTaskObj.return_value = mock_task_obj
+
+        from django_i3tasks.management.commands.i3tasks_worker import Command
+        cmd = Command()
+        try:
+            cmd.handle(queue='heavy')
+        except KeyboardInterrupt:
+            pass
+
+        mock_utils.acknowledge.assert_called_once_with(['ack-123'])
