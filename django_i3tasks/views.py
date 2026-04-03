@@ -99,7 +99,7 @@ class BeatTaskView(View):
                     # task = getattr(task_module, func_name)
                 else:
                     iter = croniter(cron, now)
-                    print(iter.get_next(datetime))
+                    print(iter.get_next(datetime.datetime))
 
             except Exception as exc:
                 logger.error(exc)
