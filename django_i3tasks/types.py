@@ -70,7 +70,12 @@ class I3TasksSettings():
             schedules: 'tuple[Schedule, ...]',
             force_sync: bool = False,
             default_max_retries: int = 3,
-            run_queue_create_command_on_startup: bool = True
+            run_queue_create_command_on_startup: bool = True,
+            health_token: 'str | None' = None,
+            health_window_minutes: int = 60,
+            health_stuck_minutes: int = 15,
+            health_failed_threshold: int = 5,
+            health_pending_age_seconds_threshold: int = 300,
     ) -> None:
         self.namespace = namespace
         self.default_queue = default_queue
@@ -79,3 +84,8 @@ class I3TasksSettings():
         self.force_sync = force_sync
         self.default_max_retries = default_max_retries
         self.run_queue_create_command_on_startup = run_queue_create_command_on_startup
+        self.health_token = health_token
+        self.health_window_minutes = health_window_minutes
+        self.health_stuck_minutes = health_stuck_minutes
+        self.health_failed_threshold = health_failed_threshold
+        self.health_pending_age_seconds_threshold = health_pending_age_seconds_threshold

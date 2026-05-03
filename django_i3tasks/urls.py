@@ -2,23 +2,19 @@
 # from action.urls import urlpatterns as action_url_patterns
 
 from django.contrib import admin
-# from django.urls import path, re_path
-# from django.conf.urls import include
+from django.urls import path
 
-# from rest_framework import routers
-
-# from api import urls as api_urls
-
-# from . import views
-# from core import views as core_views
+from .views import BeatTaskView, HealthTaskView, PushedTaskView
 
 
 admin.autodiscover()
 
-# router = routers.DefaultRouter()
-# router.register(r'user', views.UserViewSet, 'user viewset')
 
-urlpatterns = []
+urlpatterns = [
+    path("tasks-push/", PushedTaskView.as_view(), name="i3tasks-push"),
+    path("tasks-beat/", BeatTaskView.as_view(), name="i3tasks-beat"),
+    path("tasks-health/", HealthTaskView.as_view(), name="i3tasks-health"),
+]
 # urlpatterns = [
 #     path(r"", core_views.homeview, name="homeview"),
 #     path("robots.txt", core_views.robots_txt),

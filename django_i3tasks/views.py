@@ -21,6 +21,8 @@ from django.views import View
 
 from django.utils.decorators import method_decorator
 
+from django.db.models import Count, Min, Q
+
 from .models import TaskExecutionTry
 
 from .utils import TaskDecorator, TaskObj
@@ -252,3 +254,130 @@ class PushedTaskView(View):
             return JsonResponse(
                 {"status": "bad", "error": "Error on task execution"}, status=200
             )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class HealthTaskView(View):
+    """JSON health endpoint for external monitoring.
+
+    GET /i3/tasks-health/  →  aggregates over TaskExecutionTry rows.
+    Returns HTTP 200 for ok/warning, 503 for critical.
+    """
+
+    DEFAULT_WINDOW_MINUTES = 60
+    DEFAULT_STUCK_MINUTES = 15
+    DEFAULT_FAILED_THRESHOLD = 5
+    DEFAULT_PENDING_AGE_THRESHOLD_S = 300
+
+    def _get_setting(self, name, default):
+        i3tasks_settings = getattr(settings, "I3TASKS", None)
+        return getattr(i3tasks_settings, name, default) if i3tasks_settings else default
+
+    def _check_token(self, request):
+        expected = self._get_setting("health_token", None)
+        if not expected:
+            return True
+        auth = request.headers.get("Authorization", "")
+        provided = auth[7:] if auth.startswith("Bearer ") else request.GET.get("token", "")
+        return provided == expected
+
+    def get(self, request, *args, **kwargs):
+        if not self._check_token(request):
+            return JsonResponse({"status": "unauthorized"}, status=401)
+
+        window_minutes = int(self._get_setting("health_window_minutes", self.DEFAULT_WINDOW_MINUTES))
+        stuck_minutes = int(self._get_setting("health_stuck_minutes", self.DEFAULT_STUCK_MINUTES))
+        failed_threshold = int(self._get_setting("health_failed_threshold", self.DEFAULT_FAILED_THRESHOLD))
+        pending_age_threshold = int(self._get_setting(
+            "health_pending_age_seconds_threshold", self.DEFAULT_PENDING_AGE_THRESHOLD_S
+        ))
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+        window_start = now - datetime.timedelta(minutes=window_minutes)
+        stuck_cutoff = now - datetime.timedelta(minutes=stuck_minutes)
+
+        tries_in_window = TaskExecutionTry.objects.filter(asked_at__gte=window_start)
+
+        totals = tries_in_window.aggregate(
+            pending=Count("id", filter=Q(started_at__isnull=True, is_completed=False)),
+            running=Count("id", filter=Q(started_at__isnull=False, is_completed=False)),
+            success=Count("id", filter=Q(is_completed=True, is_success=True)),
+            failed=Count("id", filter=Q(is_completed=True, is_success=False)),
+        )
+
+        stuck_running = TaskExecutionTry.objects.filter(
+            is_completed=False,
+            started_at__isnull=False,
+            started_at__lt=stuck_cutoff,
+        ).count()
+
+        oldest_pending = TaskExecutionTry.objects.filter(
+            is_completed=False,
+            started_at__isnull=True,
+        ).aggregate(oldest=Min("asked_at"))["oldest"]
+        oldest_pending_age = int((now - oldest_pending).total_seconds()) if oldest_pending else 0
+
+        by_task_qs = (
+            tries_in_window
+            .values("task_execution__task_path", "task_execution__task_name")
+            .annotate(
+                success=Count("id", filter=Q(is_completed=True, is_success=True)),
+                failed=Count("id", filter=Q(is_completed=True, is_success=False)),
+                running=Count("id", filter=Q(started_at__isnull=False, is_completed=False)),
+                pending=Count("id", filter=Q(started_at__isnull=True, is_completed=False)),
+            )
+            .order_by("-failed", "-success")[:50]
+        )
+        by_task = [
+            {
+                "task_path": row["task_execution__task_path"],
+                "task_name": row["task_execution__task_name"],
+                "success": row["success"],
+                "failed": row["failed"],
+                "running": row["running"],
+                "pending": row["pending"],
+            }
+            for row in by_task_qs
+        ]
+
+        problems = []
+        if stuck_running > 0:
+            problems.append(
+                f"{stuck_running} tries running for more than {stuck_minutes} minutes"
+            )
+        if oldest_pending_age > pending_age_threshold:
+            problems.append(
+                f"oldest pending try is {oldest_pending_age}s old (>{pending_age_threshold}s)"
+            )
+        if totals["failed"] > failed_threshold:
+            problems.append(
+                f"{totals['failed']} failed tries in last {window_minutes} minutes (>{failed_threshold})"
+            )
+
+        if stuck_running > 0 or oldest_pending_age > pending_age_threshold:
+            status_label = "critical"
+        elif problems:
+            status_label = "warning"
+        else:
+            status_label = "ok"
+
+        http_status = 503 if status_label == "critical" else 200
+
+        return JsonResponse(
+            {
+                "status": status_label,
+                "now": now.isoformat(),
+                "window_minutes": window_minutes,
+                "thresholds": {
+                    "stuck_minutes": stuck_minutes,
+                    "failed_threshold": failed_threshold,
+                    "pending_age_seconds_threshold": pending_age_threshold,
+                },
+                "totals": totals,
+                "stuck_running": stuck_running,
+                "oldest_pending_age_seconds": oldest_pending_age,
+                "problems": problems,
+                "by_task": by_task,
+            },
+            status=http_status,
+        )

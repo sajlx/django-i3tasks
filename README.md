@@ -31,9 +31,10 @@ urlpatterns = [
 ]
 ```
 
-This registers two endpoints:
+This registers three endpoints:
 - `POST /i3/tasks-push/` — receives tasks pushed by Pub/Sub
 - `POST /i3/tasks-beat/` — triggered by an external scheduler (e.g. Google Cloud Scheduler) to run scheduled tasks
+- `GET  /i3/tasks-health/` — JSON health probe for external monitoring (see [Health endpoint](#health-endpoint))
 
 ### 3. Run migrations
 
@@ -315,6 +316,11 @@ python manage.py i3tasks_ensure_pubsub
 | `force_sync` | `bool` | `False` | If `True`, `.delay()` runs synchronously (useful for testing) |
 | `default_max_retries` | `int` | `3` | Maximum retry attempts on failure |
 | `run_queue_create_command_on_startup` | `bool` | `True` | Auto-run `i3tasks_ensure_pubsub` on app startup |
+| `health_token` | `str \| None` | `None` | If set, `/i3/tasks-health/` requires `Authorization: Bearer <token>` or `?token=<token>`; otherwise the endpoint is unauthenticated |
+| `health_window_minutes` | `int` | `60` | Time window over which `totals` and `by_task` aggregates are computed |
+| `health_stuck_minutes` | `int` | `15` | A try with `started_at` older than this and not yet completed counts as "stuck running" |
+| `health_failed_threshold` | `int` | `5` | Trigger `warning` when failed tries in the window exceed this number |
+| `health_pending_age_seconds_threshold` | `int` | `300` | Trigger `critical` when the oldest pending try is older than this many seconds |
 
 ### Queue types
 
@@ -323,6 +329,95 @@ python manage.py i3tasks_ensure_pubsub
 | `PushQueue(queue_name, subscription_name, push_endpoint)` | 3 fields | Pub/Sub pushes to your HTTP endpoint |
 | `PullQueue(queue_name, subscription_name)` | 2 fields | Worker polls with `i3tasks_worker --queue=<name>` |
 | `Queue` | alias for `PushQueue` | Backward-compatible; existing configs need no changes |
+
+---
+
+## Health endpoint
+
+`GET /i3/tasks-health/` is a JSON probe that aggregates `TaskExecutionTry` rows so external monitoring tools (Uptime Kuma, GCP Uptime, Pingdom, custom dashboards, etc.) can tell whether the task system is healthy.
+
+### Response shape
+
+```json
+{
+  "status": "ok",                  // "ok" | "warning" | "critical"
+  "now": "2026-05-03T10:22:08+00:00",
+  "window_minutes": 60,
+  "thresholds": {
+    "stuck_minutes": 15,
+    "failed_threshold": 5,
+    "pending_age_seconds_threshold": 300
+  },
+  "totals": {                      // counts of TaskExecutionTry within the window
+    "pending": 0,                  // started_at IS NULL, is_completed=False
+    "running": 0,                  // started_at set, is_completed=False
+    "success": 340,                // is_completed=True, is_success=True
+    "failed":  5                   // is_completed=True, is_success=False
+  },
+  "stuck_running": 0,              // running for longer than stuck_minutes (no time-window cap)
+  "oldest_pending_age_seconds": 0, // age of the oldest pending try in seconds (no time-window cap)
+  "problems": [],                  // human-readable list of triggered conditions
+  "by_task": [                     // top 50 task paths in the window, ordered by failed desc, success desc
+    {
+      "task_path": "app.tasks.send_email",
+      "task_name": "send_email",
+      "success": 20, "failed": 3, "running": 0, "pending": 0
+    }
+  ]
+}
+```
+
+### Status logic
+
+| `status`   | When                                                                                              | HTTP |
+|------------|---------------------------------------------------------------------------------------------------|------|
+| `critical` | `stuck_running > 0` **or** `oldest_pending_age_seconds > pending_age_seconds_threshold`           | 503  |
+| `warning`  | failed tries in the window > `failed_threshold` (and no critical condition)                       | 200  |
+| `ok`       | none of the above                                                                                 | 200  |
+
+`stuck_running` and `oldest_pending_age_seconds` are computed across *all* unfinished tries, not only those inside `window_minutes` — a hung worker can outlast the window.
+
+### Authentication
+
+By default the endpoint is unauthenticated (suitable behind a private network or VPC). To require a shared secret, set `health_token` in `I3TasksSettings`:
+
+```python
+I3TASKS = I3TasksSettings(
+    ...,
+    health_token="a-long-random-string",
+)
+```
+
+Then call the endpoint with either:
+
+- header: `Authorization: Bearer a-long-random-string`, or
+- query string: `?token=a-long-random-string`
+
+Requests without (or with the wrong) token receive `401 Unauthorized`.
+
+### Tuning thresholds
+
+All thresholds are configurable via `I3TasksSettings` (see the reference table above). Pick values that reflect your workload:
+
+```python
+I3TASKS = I3TasksSettings(
+    ...,
+    health_window_minutes=15,                  # tighter window for chatty workloads
+    health_stuck_minutes=5,                    # short tasks → flag hangs sooner
+    health_failed_threshold=10,                # tolerate more transient failures
+    health_pending_age_seconds_threshold=60,   # alert quickly on backlog
+)
+```
+
+### Example: monitoring & dashboards
+
+- **Uptime check (HTTP probe)** — point any HTTP monitor at `/i3/tasks-health/`. The 503 response on `critical` triggers the alert without parsing the body.
+- **Custom dashboard** — poll the endpoint from your frontend / Grafana / internal admin: use `totals` for stacked bar charts, `by_task` for the "noisiest tasks" list, `problems` for a banner.
+- **CLI quick check**:
+
+  ```bash
+  curl -fsS https://your-host.example.com/i3/tasks-health/ | jq '.status, .problems'
+  ```
 
 ---
 
