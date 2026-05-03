@@ -1,3 +1,8 @@
+# django-i3tasks — Django app for managing async tasks via HTTP
+# Copyright (C) 2024-2026 Ivan Bettarini
+# Licensed under the GNU General Public License v3.0 or later.
+# See LICENSE in the project root for full text.
+
 # -*- coding: utf-8 -*-
 
 from logging import getLogger
