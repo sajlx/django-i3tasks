@@ -11,6 +11,9 @@ import logging
 # import inspect
 # import datetime
 import os
+import atexit
+import signal
+import weakref
 import google
 
 from google.oauth2 import service_account
@@ -33,6 +36,54 @@ def get_default_queue_setting(param, default):
     default_queue = getattr(I3TASKS, 'default_queue', None)
     _param = getattr(default_queue, param, default)
     return _param
+
+
+# --- Client teardown -------------------------------------------------------
+# Every PubSubSystemUtils instance lazily opens gRPC channels for the
+# publisher/subscriber clients. Nothing closes them on process shutdown, so
+# under Django's autoreload each reload leaves dangling channels behind. We
+# track live instances in a WeakSet and close their transports on exit
+# (atexit) and on SIGTERM (containers/gunicorn), chaining any previous
+# SIGTERM handler so we don't hijack the host app's shutdown.
+
+_LIVE_INSTANCES = weakref.WeakSet()
+_TEARDOWN_REGISTERED = False
+_PREV_SIGTERM_HANDLER = None
+
+
+def _close_all_clients():
+    for inst in list(_LIVE_INSTANCES):
+        try:
+            inst.close()
+        except Exception as exc:  # never let teardown crash shutdown
+            logger.debug("Error closing PubSub clients on teardown: %s", exc)
+
+
+def _sigterm_handler(signum, frame):
+    _close_all_clients()
+    prev = _PREV_SIGTERM_HANDLER
+    if callable(prev) and prev not in (signal.SIG_IGN, signal.SIG_DFL):
+        prev(signum, frame)
+    else:
+        # Restore default behaviour and re-raise so the process actually exits.
+        signal.signal(signum, signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
+
+
+def _register_teardown():
+    global _TEARDOWN_REGISTERED, _PREV_SIGTERM_HANDLER
+    if _TEARDOWN_REGISTERED:
+        return
+    _TEARDOWN_REGISTERED = True
+
+    atexit.register(_close_all_clients)
+
+    try:
+        _PREV_SIGTERM_HANDLER = signal.getsignal(signal.SIGTERM)
+        signal.signal(signal.SIGTERM, _sigterm_handler)
+    except (ValueError, OSError):
+        # signal.signal only works in the main thread; atexit still covers us.
+        logger.debug("Could not install SIGTERM teardown handler (not main thread)")
 
 
 class PubSubSystemUtils:
@@ -66,6 +117,57 @@ class PubSubSystemUtils:
         self.namespace = getattr(settings.I3TASKS, "namespace", "default-namespace")
 
         self.encoding = encoding
+
+        if getattr(settings.I3TASKS, "register_client_teardown", True):
+            _LIVE_INSTANCES.add(self)
+            _register_teardown()
+
+    def close(self):
+        """Close the gRPC transports of any cached Pub/Sub clients.
+
+        Idempotent and defensive: tolerates client-library version
+        differences and never raises, so it is safe to call from atexit /
+        signal handlers.
+        """
+        sub = self._subscription_client
+        if sub is not None:
+            close_sub = getattr(sub, "close", None)
+            if callable(close_sub):
+                try:
+                    close_sub()
+                except Exception as exc:
+                    logger.debug("Error closing subscriber client: %s", exc)
+            self._subscription_client = None
+
+        pub = self._publisher_client
+        if pub is not None:
+            # PublisherClient.stop() flushes pending batches and stops the
+            # background commit threads; older/newer versions may expose
+            # close() and/or an underlying transport instead.
+            for method in ("stop", "close"):
+                fn = getattr(pub, method, None)
+                if callable(fn):
+                    try:
+                        fn()
+                    except Exception as exc:
+                        logger.debug("Error on publisher.%s(): %s", method, exc)
+            transport = getattr(pub, "transport", None) or getattr(
+                getattr(pub, "api", None), "transport", None
+            )
+            close_transport = getattr(transport, "close", None)
+            if callable(close_transport):
+                try:
+                    close_transport()
+                except Exception as exc:
+                    logger.debug("Error closing publisher transport: %s", exc)
+            self._publisher_client = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+        return False
 
     def get_publisher_client(self):
         if self._publisher_client is not None:

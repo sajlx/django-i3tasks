@@ -100,3 +100,5 @@ class Command(BaseCommand):
         except KeyboardInterrupt:
             logger.info(f"Pull worker for queue '{queue_name}' stopped.")
             self.stdout.write("Worker stopped.")
+        finally:
+            pub_sub.close()
