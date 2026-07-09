@@ -48,7 +48,7 @@ Dependencies: Django, djangorestframework, requests, croniter>=2.0.1
 
 - **`django_i3tasks/utils.py`**: Core logic — `TaskDecorator`, `TaskObj` (task lifecycle), `TaskTryObj` (attempt handling), `PubSubTaskUtils` (Pub/Sub serialization/enqueue).
 - **`django_i3tasks/models.py`**: `TaskExecution`, `TaskExecutionTry`, `TaskExecutionResult` — DB persistence layer.
-- **`django_i3tasks/views.py`**: `PushedTaskView` (receives push from Pub/Sub), `BeatTaskView` (triggers scheduled tasks).
+- **`django_i3tasks/views.py`**: `PushedTaskView` (receives push from Pub/Sub), `BeatTaskView` (triggers scheduled tasks), `HealthTaskView` (`/i3/tasks-health/` aggregate probe), `TaskStatusView` (`/i3/tasks-status/<int:id>/` and `/<uuid:uuid>/` — single-task status). `TaskExecution` has both an integer PK and a public `uuid` field; `.delay()`/`.async_run()` return a `ChainHandle` exposing `.task_execution_id`, `.task_uuid`, `.task_execution`.
 - **`django_i3tasks/queue_manager/google_pubsub.py`**: `PubSubSystemUtils` — manages Pub/Sub clients, topics, and subscriptions. Supports emulator and production.
 - **`django_i3tasks/types.py`**: `Queue`, `Schedule`, `I3TasksSettings` dataclasses used for configuration.
 - **`django_i3tasks/management/commands/i3tasks_ensure_pubsub.py`**: Management command that creates Pub/Sub topics/subscriptions on startup.

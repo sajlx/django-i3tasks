@@ -1,0 +1,5 @@
+include README.md
+recursive-include django_i3tasks/static/ *
+recursive-include django_i3tasks/templates/ *
+recursive-include django_i3tasks/queue_manager/ *.py
+recursive-include docs/ *

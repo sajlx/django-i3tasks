@@ -31,10 +31,11 @@ urlpatterns = [
 ]
 ```
 
-This registers three endpoints:
+This registers these endpoints:
 - `POST /i3/tasks-push/` — receives tasks pushed by Pub/Sub
 - `POST /i3/tasks-beat/` — triggered by an external scheduler (e.g. Google Cloud Scheduler) to run scheduled tasks
 - `GET  /i3/tasks-health/` — JSON health probe for external monitoring (see [Health endpoint](#health-endpoint))
+- `GET  /i3/tasks-status/<id>/` and `GET /i3/tasks-status/<uuid>/` — status of a single task (see [Status endpoint](#status-endpoint))
 
 ### 3. Run migrations
 
@@ -138,6 +139,20 @@ send_email.delay("user@example.com", "Hello", "World")
 # or equivalently:
 send_email.async_run("user@example.com", "Hello", "World")
 ```
+
+`delay()` / `async_run()` return a `ChainHandle` that exposes the identifiers of
+the enqueued task, so you can persist them and later query its status:
+
+```python
+handle = send_email.delay("user@example.com", "Hello", "World")
+
+handle.task_execution_id   # integer PK of the TaskExecution
+handle.task_uuid           # public UUID of the TaskExecution
+handle.task_execution      # the TaskExecution instance itself
+```
+
+Both identifiers can be passed to the [status endpoint](#status-endpoint)
+(`/i3/tasks-status/<id>/` or `/i3/tasks-status/<uuid>/`).
 
 ### Running a task synchronously
 
@@ -317,6 +332,7 @@ python manage.py i3tasks_ensure_pubsub
 | `default_max_retries` | `int` | `3` | Maximum retry attempts on failure |
 | `run_queue_create_command_on_startup` | `bool` | `True` | Auto-run `i3tasks_ensure_pubsub` on app startup |
 | `health_token` | `str \| None` | `None` | If set, `/i3/tasks-health/` requires `Authorization: Bearer <token>` or `?token=<token>`; otherwise the endpoint is unauthenticated |
+| `status_token` | `str \| None` | `None` | If set, `/i3/tasks-status/` requires `Authorization: Bearer <token>` or `?token=<token>`. Falls back to `health_token` when unset; otherwise the endpoint is unauthenticated |
 | `health_window_minutes` | `int` | `60` | Time window over which `totals` and `by_task` aggregates are computed |
 | `health_stuck_minutes` | `int` | `15` | A try with `started_at` older than this and not yet completed counts as "stuck running" |
 | `health_failed_threshold` | `int` | `5` | Trigger `warning` when failed tries in the window exceed this number |
@@ -418,6 +434,79 @@ I3TASKS = I3TasksSettings(
   ```bash
   curl -fsS https://your-host.example.com/i3/tasks-health/ | jq '.status, .problems'
   ```
+
+---
+
+## Status endpoint
+
+While the [health endpoint](#health-endpoint) reports on the task system as a
+whole, the status endpoint reports on **one specific task**. Look it up either by
+its integer PK or by its public UUID (both are returned at dispatch time from the
+[`ChainHandle`](#running-a-task-asynchronously)):
+
+```
+GET /i3/tasks-status/<int:id>/
+GET /i3/tasks-status/<uuid:uuid>/
+```
+
+### Response shape
+
+```jsonc
+{
+  "status": "success",              // success | failed | running | pending | unknown
+  "task": {
+    "id": 42,
+    "uuid": "6f1c2e0a-....",
+    "task_name": "send_email",
+    "task_path": "myapp.tasks",
+    "task_args": ["user@example.com", "Hello", "World"],
+    "task_kwargs": {},
+    "task_group_id": null,
+    "created_at": "2026-07-09T10:00:00+00:00",
+    "updated_at": "2026-07-09T10:00:02+00:00"
+  },
+  "tries": [
+    {
+      "task_execution_try_id": 71,
+      "try_number": 1,
+      "asked_at": "2026-07-09T10:00:00+00:00",
+      "started_at": "2026-07-09T10:00:01+00:00",
+      "finished_at": "2026-07-09T10:00:02+00:00",
+      "is_completed": true,
+      "is_success": true,
+      "result": { "ok": true }
+    }
+  ]
+}
+```
+
+Returns `404` with `{"status": "not_found"}` when no task matches. The top-level
+`status` collapses all attempts into one label: `success` if any try succeeded,
+otherwise `failed` if the latest try completed, `running` if it started but has
+not completed, `pending` if it was only enqueued, and `unknown` when there are no
+tries yet.
+
+### Authentication
+
+Optional, mirroring the health endpoint. Set `status_token` (or reuse
+`health_token`) on `I3TASKS` to require a token:
+
+```python
+I3TASKS = I3TasksSettings(
+    # ...
+    status_token="a-long-random-secret",
+)
+```
+
+```bash
+curl -H "Authorization: Bearer a-long-random-secret" \
+  https://your-host.example.com/i3/tasks-status/42/
+# or:  ?token=a-long-random-secret
+```
+
+When neither `status_token` nor `health_token` is set, the endpoint is
+unauthenticated. Because the response includes task args, kwargs and results,
+set a token if any of that is sensitive.
 
 ---
 

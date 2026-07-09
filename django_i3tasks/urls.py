@@ -9,7 +9,7 @@
 from django.contrib import admin
 from django.urls import path
 
-from .views import BeatTaskView, HealthTaskView, PushedTaskView
+from .views import BeatTaskView, HealthTaskView, PushedTaskView, TaskStatusView
 
 
 admin.autodiscover()
@@ -19,6 +19,8 @@ urlpatterns = [
     path("tasks-push/", PushedTaskView.as_view(), name="i3tasks-push"),
     path("tasks-beat/", BeatTaskView.as_view(), name="i3tasks-beat"),
     path("tasks-health/", HealthTaskView.as_view(), name="i3tasks-health"),
+    path("tasks-status/<int:task_id>/", TaskStatusView.as_view(), name="i3tasks-status"),
+    path("tasks-status/<uuid:task_uuid>/", TaskStatusView.as_view(), name="i3tasks-status-uuid"),
 ]
 # urlpatterns = [
 #     path(r"", core_views.homeview, name="homeview"),

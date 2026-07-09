@@ -22,6 +22,26 @@ class ChainHandle:
         # Tracks the most-recently dispatched tail handle in force_sync mode
         self._tail_handle = None
 
+    @property
+    def task_execution(self):
+        """TaskExecution avviato da questo handle (None se build_chain())."""
+        if self.task_execution_try is None:
+            return None
+        return self.task_execution_try.task_execution
+
+    @property
+    def task_execution_id(self):
+        """PK intera del TaskExecution (None se build_chain())."""
+        if self.task_execution_try is None:
+            return None
+        return self.task_execution_try.task_execution_id
+
+    @property
+    def task_uuid(self):
+        """UUID pubblico del TaskExecution (None se build_chain())."""
+        te = self.task_execution
+        return te.uuid if te is not None else None
+
     def then(self, task, *args, **kwargs):
         """
         Aggiunge un passo alla catena.

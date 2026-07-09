@@ -31,7 +31,10 @@ class TaskExecution(CreatedUpdatedModel):
     # choice = models.CharField(null=False, max_length=32, blank=False, choices=USER_CHOICES)
 
     # id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    # uuid_id = models.UUIDField(default=uuid.uuid4, editable=False)
+
+    # Public, non-guessable identifier. Kept separate from the integer PK so
+    # existing rows and foreign keys stay valid; lookups can use either one.
+    uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
 
     task_name = models.CharField(null=False, max_length=256, blank=False)
     task_path = models.CharField(null=False, max_length=256, blank=False)

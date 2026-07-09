@@ -77,6 +77,7 @@ class I3TasksSettings():
             run_queue_create_command_on_startup: bool = True,
             register_client_teardown: bool = True,
             health_token: 'str | None' = None,
+            status_token: 'str | None' = None,
             health_window_minutes: int = 60,
             health_stuck_minutes: int = 15,
             health_failed_threshold: int = 5,
@@ -91,6 +92,7 @@ class I3TasksSettings():
         self.run_queue_create_command_on_startup = run_queue_create_command_on_startup
         self.register_client_teardown = register_client_teardown
         self.health_token = health_token
+        self.status_token = status_token
         self.health_window_minutes = health_window_minutes
         self.health_stuck_minutes = health_stuck_minutes
         self.health_failed_threshold = health_failed_threshold

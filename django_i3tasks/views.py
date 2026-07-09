@@ -28,7 +28,7 @@ from django.utils.decorators import method_decorator
 
 from django.db.models import Count, Min, Q
 
-from .models import TaskExecutionTry
+from .models import TaskExecution, TaskExecutionTry
 
 from .utils import TaskDecorator, TaskObj
 
@@ -385,4 +385,91 @@ class HealthTaskView(View):
                 "by_task": by_task,
             },
             status=http_status,
+        )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class TaskStatusView(View):
+    """JSON status endpoint for a single task.
+
+    GET /i3/tasks-status/<int:task_id>/    → lookup by integer PK
+    GET /i3/tasks-status/<uuid:task_uuid>/ → lookup by public UUID
+
+    Returns the TaskExecution metadata plus every TaskExecutionTry and its
+    result. 404 if the task does not exist.
+    """
+
+    def _get_setting(self, name, default):
+        i3tasks_settings = getattr(settings, "I3TASKS", None)
+        return getattr(i3tasks_settings, name, default) if i3tasks_settings else default
+
+    def _check_token(self, request):
+        # Optional gating: if I3TASKS.status_token (falls back to health_token)
+        # is set, require it via Bearer header or ?token=. Off by default.
+        expected = self._get_setting("status_token", None) or self._get_setting("health_token", None)
+        if not expected:
+            return True
+        auth = request.headers.get("Authorization", "")
+        provided = auth[7:] if auth.startswith("Bearer ") else request.GET.get("token", "")
+        return provided == expected
+
+    @staticmethod
+    def _derive_status(tries):
+        """Collapse the tries into a single coarse status label."""
+        if not tries:
+            return "unknown"
+        if any(t.is_completed and t.is_success for t in tries):
+            return "success"
+        latest = tries[-1]
+        if latest.is_completed:
+            return "failed"
+        if latest.started_at is not None:
+            return "running"
+        return "pending"
+
+    def _serialize_try(self, task_try):
+        result = task_try.result.result if hasattr(task_try, "result") else None
+        return {
+            "task_execution_try_id": task_try.id,
+            "try_number": task_try.try_number,
+            "asked_at": task_try.asked_at.isoformat() if task_try.asked_at else None,
+            "started_at": task_try.started_at.isoformat() if task_try.started_at else None,
+            "finished_at": task_try.finished_at.isoformat() if task_try.finished_at else None,
+            "is_completed": task_try.is_completed,
+            "is_success": task_try.is_success,
+            "result": result,
+        }
+
+    def get(self, request, task_id=None, task_uuid=None, *args, **kwargs):
+        if not self._check_token(request):
+            return JsonResponse({"status": "unauthorized"}, status=401)
+
+        qs = TaskExecution.objects.prefetch_related("tries__result")
+        if task_uuid is not None:
+            task_execution = qs.filter(uuid=task_uuid).first()
+        else:
+            task_execution = qs.filter(id=task_id).first()
+
+        if task_execution is None:
+            return JsonResponse({"status": "not_found"}, status=404)
+
+        tries = list(task_execution.tries.all().order_by("try_number"))
+
+        return JsonResponse(
+            {
+                "status": self._derive_status(tries),
+                "task": {
+                    "id": task_execution.id,
+                    "uuid": str(task_execution.uuid),
+                    "task_name": task_execution.task_name,
+                    "task_path": task_execution.task_path,
+                    "task_args": task_execution.task_args,
+                    "task_kwargs": task_execution.task_kwargs,
+                    "task_group_id": task_execution.task_group_id,
+                    "created_at": task_execution.created_at.isoformat() if task_execution.created_at else None,
+                    "updated_at": task_execution.updated_at.isoformat() if task_execution.updated_at else None,
+                },
+                "tries": [self._serialize_try(t) for t in tries],
+            },
+            status=200,
         )
