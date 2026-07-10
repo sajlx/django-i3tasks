@@ -9,9 +9,15 @@ from django.db import migrations, models
 
 
 def populate_uuids(apps, schema_editor):
-    """Assign a fresh uuid to every pre-existing row before the unique constraint."""
+    """Assign a fresh uuid to every pre-existing row before the unique constraint.
+
+    The preceding AddField sets ``default=uuid.uuid4``, which Django evaluates once
+    for the ADD COLUMN — so every existing row is backfilled with the *same* uuid
+    (not NULL). We must therefore reassign a distinct uuid to *all* rows here,
+    unconditionally, or the following unique constraint fails on duplicates.
+    """
     TaskExecution = apps.get_model('i3tasks', 'TaskExecution')
-    for pk in TaskExecution.objects.filter(uuid__isnull=True).values_list('pk', flat=True):
+    for pk in TaskExecution.objects.values_list('pk', flat=True):
         TaskExecution.objects.filter(pk=pk).update(uuid=uuid.uuid4())
 
 

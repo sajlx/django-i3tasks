@@ -8,7 +8,7 @@ long_description = (this_directory / "README.md").read_text()
 
 setup(
     name='django_i3tasks',
-    version='0.1.3',
+    version='0.1.4',
     description='Django app for manage async tasks by http requests',
     long_description=long_description,
     long_description_content_type='text/markdown',
