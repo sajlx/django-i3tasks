@@ -74,6 +74,8 @@ class I3TasksSettings():
             schedules: 'tuple[Schedule, ...]',
             force_sync: bool = False,
             default_max_retries: int = 3,
+            retry_minimum_backoff_seconds: 'int | None' = 10,
+            retry_maximum_backoff_seconds: 'int | None' = 600,
             run_queue_create_command_on_startup: bool = True,
             register_client_teardown: bool = True,
             health_token: 'str | None' = None,
@@ -89,6 +91,10 @@ class I3TasksSettings():
         self.schedules = schedules
         self.force_sync = force_sync
         self.default_max_retries = default_max_retries
+        # Pub/Sub redelivery backoff. Without it the subscription defaults to
+        # near-zero backoff and hammers an unreachable push endpoint forever.
+        self.retry_minimum_backoff_seconds = retry_minimum_backoff_seconds
+        self.retry_maximum_backoff_seconds = retry_maximum_backoff_seconds
         self.run_queue_create_command_on_startup = run_queue_create_command_on_startup
         self.register_client_teardown = register_client_teardown
         self.health_token = health_token
