@@ -18,6 +18,7 @@ import google
 
 from google.oauth2 import service_account
 from google.cloud import pubsub_v1
+from google.protobuf.duration_pb2 import Duration
 
 from django.conf import settings
 
@@ -313,6 +314,24 @@ class PubSubSystemUtils:
         self._subscription_already_exists = self.subscription_name in subscriptions
         return self._subscription_already_exists
 
+    def build_retry_policy(self):
+        """Redelivery backoff for the subscription, or None to leave it unset.
+
+        Pub/Sub's default is to redeliver with near-zero backoff, so a push
+        endpoint that is refusing connections gets hammered indefinitely.
+        """
+        I3TASKS: I3TasksSettings = settings.I3TASKS
+        minimum = getattr(I3TASKS, 'retry_minimum_backoff_seconds', 10)
+        maximum = getattr(I3TASKS, 'retry_maximum_backoff_seconds', 600)
+        if minimum is None and maximum is None:
+            return None
+        policy = pubsub_v1.types.RetryPolicy()
+        if minimum is not None:
+            policy.minimum_backoff = Duration(seconds=int(minimum))
+        if maximum is not None:
+            policy.maximum_backoff = Duration(seconds=int(maximum))
+        return policy
+
     def create_subscription(self, endpoint=None):
         I3TASKS: I3TasksSettings = settings.I3TASKS
         subscriber = self.get_subscription_client()
@@ -326,19 +345,22 @@ class PubSubSystemUtils:
             I3TASKS.default_queue,
         )
 
+        subscription = pubsub_v1.types.Subscription(
+            name=subscription_name,
+            topic=topic_name,
+        )
+        if not isinstance(matched_queue, PullQueue):
+            _endpoint = endpoint or matched_queue.push_endpoint
+            subscription.push_config = pubsub_v1.types.PushConfig(push_endpoint=_endpoint)
+
+        retry_policy = self.build_retry_policy()
+        if retry_policy is not None:
+            subscription.retry_policy = retry_policy
+
         try:
-            if isinstance(matched_queue, PullQueue):
-                subscriber.create_subscription(
-                    name=subscription_name,
-                    topic=topic_name,
-                )
-            else:
-                _endpoint = endpoint or matched_queue.push_endpoint
-                subscriber.create_subscription(
-                    name=subscription_name,
-                    topic=topic_name,
-                    push_config=pubsub_v1.types.PushConfig(push_endpoint=_endpoint),
-                )
+            # The policy fields are only accepted through `request=`; the
+            # flattened kwargs of create_subscription() do not carry them.
+            subscriber.create_subscription(request=subscription)
         except google.api_core.exceptions.AlreadyExists:
             logger.info(f"Subscription {subscription_name} already exists")
             self._subscription_already_exists = True

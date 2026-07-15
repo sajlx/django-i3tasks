@@ -68,6 +68,8 @@ class CreateSubscriptionTest(TestCase):
         mock_settings.I3TASKS.namespace = 'tasks.test'
         mock_settings.I3TASKS.default_queue = PushQueue('default', 'default', 'http://host/push/')
         mock_settings.I3TASKS.other_queues = [PullQueue('heavy', 'heavy-pull')]
+        mock_settings.I3TASKS.retry_minimum_backoff_seconds = 10
+        mock_settings.I3TASKS.retry_maximum_backoff_seconds = 600
 
         utils = self._make_system_utils(topic_name='heavy', subscription_name='heavy-pull')
 
@@ -81,10 +83,9 @@ class CreateSubscriptionTest(TestCase):
 
         utils.create_subscription()
 
-        call_kwargs = mock_subscriber.create_subscription.call_args[1]
-        # Must NOT have push_config set
-        push_config = call_kwargs.get('push_config', None)
-        self.assertIsNone(push_config)
+        request = mock_subscriber.create_subscription.call_args[1]['request']
+        # Must NOT have a push endpoint set
+        self.assertEqual(request.push_config.push_endpoint, '')
 
     @patch('django_i3tasks.queue_manager.google_pubsub.settings')
     def test_push_queue_subscription_has_push_config(self, mock_settings):
@@ -93,6 +94,8 @@ class CreateSubscriptionTest(TestCase):
         mock_settings.I3TASKS.namespace = 'tasks.test'
         mock_settings.I3TASKS.default_queue = PushQueue('default', 'default', 'http://host/push/')
         mock_settings.I3TASKS.other_queues = []
+        mock_settings.I3TASKS.retry_minimum_backoff_seconds = 10
+        mock_settings.I3TASKS.retry_maximum_backoff_seconds = 600
 
         utils = self._make_system_utils(topic_name='default', subscription_name='default')
 
@@ -106,8 +109,92 @@ class CreateSubscriptionTest(TestCase):
 
         utils.create_subscription()
 
-        call_kwargs = mock_subscriber.create_subscription.call_args[1]
-        self.assertIsNotNone(call_kwargs.get('push_config'))
+        request = mock_subscriber.create_subscription.call_args[1]['request']
+        self.assertEqual(request.push_config.push_endpoint, 'http://host/push/')
+
+
+class SubscriptionRetryPolicyTest(TestCase):
+    """A push subscription with no retry policy retries a dead endpoint with
+    near-zero backoff. Measured against the Pub/Sub emulator with the endpoint
+    down: no policy -> ~700 log lines / 25s, forever; with a 10s/600s policy ->
+    ~86 lines and decaying. Hence a retry policy is always attached.
+    """
+
+    def _make_system_utils(self, topic_name='default', subscription_name='default'):
+        with patch.object(PubSubSystemUtils, '__init__', lambda self, *args, **kw: None):
+            utils = PubSubSystemUtils.__new__(PubSubSystemUtils)
+        utils.project_id = 'test-project'
+        utils.topic_name = topic_name
+        utils.subscription_name = subscription_name
+        utils.namespace = 'tasks.test'
+        utils.encoding = 'utf-8'
+        utils._publisher_client = None
+        utils._subscription_client = None
+        utils._queue_already_exists = None
+        utils._subscription_already_exists = None
+        return utils
+
+    def _run(self, mock_settings, queue, min_backoff=10, max_backoff=600):
+        from django_i3tasks.types import PushQueue
+        mock_settings.PUBSUB_CONFIG = {'EMULATOR': True, 'PROJECT_ID': 'test-project'}
+        mock_settings.I3TASKS.namespace = 'tasks.test'
+        mock_settings.I3TASKS.default_queue = queue if isinstance(queue, PushQueue) else PushQueue(
+            'default', 'default', 'http://host/push/')
+        mock_settings.I3TASKS.other_queues = [] if isinstance(queue, PushQueue) else [queue]
+        mock_settings.I3TASKS.retry_minimum_backoff_seconds = min_backoff
+        mock_settings.I3TASKS.retry_maximum_backoff_seconds = max_backoff
+
+        utils = self._make_system_utils(queue.queue_name, queue.subscription_name)
+        mock_subscriber, mock_publisher = MagicMock(), MagicMock()
+        mock_publisher.topic_path.return_value = 'projects/test-project/topics/t'
+        mock_subscriber.subscription_path.return_value = 'projects/test-project/subscriptions/s'
+        utils._publisher_client = mock_publisher
+        utils._subscription_client = mock_subscriber
+
+        utils.create_subscription()
+        return mock_subscriber.create_subscription.call_args[1]['request']
+
+    @patch('django_i3tasks.queue_manager.google_pubsub.settings')
+    def test_push_subscription_has_retry_policy(self, mock_settings):
+        from django_i3tasks.types import PushQueue
+        request = self._run(mock_settings, PushQueue('default', 'default', 'http://host/push/'))
+        self.assertEqual(request.retry_policy.minimum_backoff.seconds, 10)
+        self.assertEqual(request.retry_policy.maximum_backoff.seconds, 600)
+
+    @patch('django_i3tasks.queue_manager.google_pubsub.settings')
+    def test_pull_subscription_has_retry_policy(self, mock_settings):
+        from django_i3tasks.types import PullQueue
+        request = self._run(mock_settings, PullQueue('heavy', 'heavy-pull'))
+        self.assertEqual(request.retry_policy.minimum_backoff.seconds, 10)
+
+    @patch('django_i3tasks.queue_manager.google_pubsub.settings')
+    def test_backoff_values_come_from_settings(self, mock_settings):
+        from django_i3tasks.types import PushQueue
+        request = self._run(mock_settings, PushQueue('default', 'default', 'http://host/push/'),
+                            min_backoff=5, max_backoff=60)
+        self.assertEqual(request.retry_policy.minimum_backoff.seconds, 5)
+        self.assertEqual(request.retry_policy.maximum_backoff.seconds, 60)
+
+    @patch('django_i3tasks.queue_manager.google_pubsub.settings')
+    def test_retry_policy_can_be_disabled(self, mock_settings):
+        from django_i3tasks.types import PushQueue
+        request = self._run(mock_settings, PushQueue('default', 'default', 'http://host/push/'),
+                            min_backoff=None, max_backoff=None)
+        self.assertFalse('retry_policy' in request)
+
+
+class SubscriptionRetryPolicyDefaultsTest(TestCase):
+
+    def test_settings_expose_retry_backoff_defaults(self):
+        from django_i3tasks.types import I3TasksSettings, PushQueue
+        s = I3TasksSettings(
+            namespace='tasks.test',
+            default_queue=PushQueue('default', 'default', 'http://host/push/'),
+            other_queues=(),
+            schedules=(),
+        )
+        self.assertEqual(s.retry_minimum_backoff_seconds, 10)
+        self.assertEqual(s.retry_maximum_backoff_seconds, 600)
 
 
 class PullMessagesAcknowledgeTest(TestCase):

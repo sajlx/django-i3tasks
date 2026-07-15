@@ -330,6 +330,8 @@ python manage.py i3tasks_ensure_pubsub
 | `schedules` | `tuple[Schedule]` | `()` | Scheduled tasks (cron-based) |
 | `force_sync` | `bool` | `False` | If `True`, `.delay()` runs synchronously (useful for testing) |
 | `default_max_retries` | `int` | `3` | Maximum retry attempts on failure |
+| `retry_minimum_backoff_seconds` | `int \| None` | `10` | Pub/Sub redelivery backoff floor. `None` on both backoff params leaves the subscription's retry policy unset (Pub/Sub then redelivers with near-zero backoff) |
+| `retry_maximum_backoff_seconds` | `int \| None` | `600` | Pub/Sub redelivery backoff ceiling |
 | `run_queue_create_command_on_startup` | `bool` | `True` | Auto-run `i3tasks_ensure_pubsub` on app startup |
 | `health_token` | `str \| None` | `None` | If set, `/i3/tasks-health/` requires `Authorization: Bearer <token>` or `?token=<token>`; otherwise the endpoint is unauthenticated |
 | `status_token` | `str \| None` | `None` | If set, `/i3/tasks-status/` requires `Authorization: Bearer <token>` or `?token=<token>`. Falls back to `health_token` when unset; otherwise the endpoint is unauthenticated |
