@@ -34,6 +34,14 @@ class Command(BaseCommand):
             help='Override the retention window: delete rows older than N days.',
         )
         parser.add_argument(
+            '--batch-size',
+            dest='batch_size',
+            type=int,
+            default=None,
+            help='Delete in chunks of N rows (one transaction each) instead of a '
+                 'single large DELETE. Recommended for the first purge of a big table.',
+        )
+        parser.add_argument(
             '--dry-run',
             dest='dry_run',
             action='store_true',
@@ -56,6 +64,6 @@ class Command(BaseCommand):
             self.stdout.write(f"[dry-run] {count} TaskExecution rows would be deleted.")
             return
 
-        deleted = clean_old_task_executions(older_than)
+        deleted = clean_old_task_executions(older_than, batch_size=options.get('batch_size'))
         logger.info("i3tasks_clean deleted %s TaskExecution rows", deleted)
         self.stdout.write(f"Deleted {deleted} TaskExecution rows.")

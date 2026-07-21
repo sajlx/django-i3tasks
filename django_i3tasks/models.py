@@ -59,6 +59,11 @@ class TaskExecution(CreatedUpdatedModel):
     # reties = models.IntegerField(null=False, blank=False, default=0)
     # max_reties = models.IntegerField(null=False, blank=False, default=settings.MAX_RETRIES)
 
+    class Meta:
+        # Index on created_at powers the retention query (created_at < cutoff).
+        # Created via migration 0007 with CREATE INDEX CONCURRENTLY on PostgreSQL.
+        indexes = [models.Index(fields=['created_at'], name='i3tasks_te_created_idx')]
+
 
 class TaskExecutionTry(CreatedUpdatedModel):
     task_execution = models.ForeignKey(

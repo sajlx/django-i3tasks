@@ -35,8 +35,12 @@ def old_task_executions(older_than=None):
     return TaskExecution.objects.filter(created_at__lt=cutoff)
 
 
-def clean_old_task_executions(older_than=None):
+def clean_old_task_executions(older_than=None, batch_size=None):
     """Delete TaskExecution rows older than the cutoff (cascades to tries/results).
+
+    older_than: a timedelta. Falls back to I3TASKS.autoclean_older_than.
+    batch_size: if given, delete in chunks of this many rows (one transaction per
+        chunk) instead of a single large DELETE — safer for a big first purge.
 
     Returns the number of TaskExecution rows deleted. No-op returning 0 when no
     threshold is configured/passed.
@@ -44,6 +48,17 @@ def clean_old_task_executions(older_than=None):
     qs = old_task_executions(older_than)
     if qs is None:
         return 0
-    count = qs.count()
-    qs.delete()
-    return count
+
+    if not batch_size:
+        count = qs.count()
+        qs.delete()
+        return count
+
+    total = 0
+    while True:
+        pks = list(qs.values_list('pk', flat=True)[:batch_size])
+        if not pks:
+            break
+        TaskExecution.objects.filter(pk__in=pks).delete()
+        total += len(pks)
+    return total

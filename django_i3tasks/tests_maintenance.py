@@ -8,6 +8,7 @@ from io import StringIO
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.db import connection
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
@@ -74,6 +75,26 @@ class CleanOldTaskExecutionsTest(TestCase):
         self.assertEqual(deleted, 1)
         self.assertFalse(TaskExecution.objects.filter(pk=old.pk).exists())
         self.assertTrue(TaskExecution.objects.filter(pk=recent.pk).exists())
+
+    def test_batched_delete_removes_all_matching(self):
+        for _ in range(5):
+            _make(age_days=40)
+        _make(age_days=5)
+        deleted = clean_old_task_executions(older_than=timedelta(days=30), batch_size=2)
+        self.assertEqual(deleted, 5)
+        # only the recent row survives
+        self.assertEqual(TaskExecution.objects.count(), 1)
+
+
+class CreatedAtIndexTest(TestCase):
+
+    def test_created_at_index_present(self):
+        with connection.cursor() as cursor:
+            constraints = connection.introspection.get_constraints(
+                cursor, TaskExecution._meta.db_table
+            )
+        indexed_columns = [c['columns'] for c in constraints.values() if c.get('index')]
+        self.assertIn(['created_at'], indexed_columns)
 
 
 class I3TasksCleanCommandTest(TestCase):

@@ -541,6 +541,20 @@ python manage.py i3tasks_clean --days 7
 python manage.py i3tasks_clean --days 30 --dry-run
 ```
 
+`created_at` is indexed (migration `0007`, `CREATE INDEX CONCURRENTLY` on
+PostgreSQL) so the retention query stays cheap as the table grows.
+
+**First purge of a large table.** A plain `i3tasks_clean` issues a single
+`DELETE`, which on a table with hundreds of thousands of stale rows is one huge
+transaction. Use `--batch-size` to delete in chunks (one transaction each):
+
+```bash
+python manage.py i3tasks_clean --days 30 --batch-size 5000
+```
+
+The same `batch_size` is accepted by the helper and the built-in task. After the
+backlog is cleared, the recurring daily job is trivial (few rows per run).
+
 To keep the tables bounded, schedule the cleanup. Three ways, pick one:
 
 - **External cron / Cloud Scheduler** running `python manage.py i3tasks_clean`.
