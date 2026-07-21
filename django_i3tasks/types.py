@@ -4,6 +4,7 @@
 # See LICENSE in the project root for full text.
 
 from collections import namedtuple
+from datetime import timedelta
 
 
 PushQueue = namedtuple('PushQueue', [
@@ -80,6 +81,7 @@ class I3TasksSettings():
             register_client_teardown: bool = True,
             health_token: 'str | None' = None,
             status_token: 'str | None' = None,
+            autoclean_older_than: 'timedelta | None' = None,
             health_window_minutes: int = 60,
             health_stuck_minutes: int = 15,
             health_failed_threshold: int = 5,
@@ -99,6 +101,10 @@ class I3TasksSettings():
         self.register_client_teardown = register_client_teardown
         self.health_token = health_token
         self.status_token = status_token
+        # Optional timedelta: TaskExecution rows older than this are eligible for
+        # cleanup (via i3tasks_clean / clean_old_task_executions) and are pruned
+        # up-front by the 0006 uuid migration. None disables autoclean.
+        self.autoclean_older_than = autoclean_older_than
         self.health_window_minutes = health_window_minutes
         self.health_stuck_minutes = health_stuck_minutes
         self.health_failed_threshold = health_failed_threshold

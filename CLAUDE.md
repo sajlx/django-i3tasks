@@ -52,6 +52,7 @@ Dependencies: Django, djangorestframework, requests, croniter>=2.0.1
 - **`django_i3tasks/queue_manager/google_pubsub.py`**: `PubSubSystemUtils` — manages Pub/Sub clients, topics, and subscriptions. Supports emulator and production.
 - **`django_i3tasks/types.py`**: `Queue`, `Schedule`, `I3TasksSettings` dataclasses used for configuration.
 - **`django_i3tasks/management/commands/i3tasks_ensure_pubsub.py`**: Management command that creates Pub/Sub topics/subscriptions on startup.
+- **`django_i3tasks/maintenance.py`**: `clean_old_task_executions()` / `old_task_executions()` — prune `TaskExecution` older than `I3TASKS.autoclean_older_than` (a `timedelta`; cascades to tries/results). Three triggers: the `i3tasks_clean` management command (`--days`, `--dry-run`), the built-in `django_i3tasks.tasks.autoclean_task` (a `@TaskDecorator` task schedulable via `I3TASKS.schedules`), or calling the helper directly. The `0006` uuid migration also honours this setting (pre-prunes old rows) and is backend-conditional (Postgres `gen_random_uuid()` single UPDATE, else per-row loop).
 
 ### Required Host Project Settings
 

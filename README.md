@@ -335,6 +335,7 @@ python manage.py i3tasks_ensure_pubsub
 | `run_queue_create_command_on_startup` | `bool` | `True` | Auto-run `i3tasks_ensure_pubsub` on app startup |
 | `health_token` | `str \| None` | `None` | If set, `/i3/tasks-health/` requires `Authorization: Bearer <token>` or `?token=<token>`; otherwise the endpoint is unauthenticated |
 | `status_token` | `str \| None` | `None` | If set, `/i3/tasks-status/` requires `Authorization: Bearer <token>` or `?token=<token>`. Falls back to `health_token` when unset; otherwise the endpoint is unauthenticated |
+| `autoclean_older_than` | `timedelta \| None` | `None` | Retention window for old `TaskExecution` records. Drives the `i3tasks_clean` command / `clean_old_task_executions()` helper, and pre-prunes old rows in the `0006` uuid migration. `None` disables autoclean (see [Retention / autoclean](#retention--autoclean)) |
 | `health_window_minutes` | `int` | `60` | Time window over which `totals` and `by_task` aggregates are computed |
 | `health_stuck_minutes` | `int` | `15` | A try with `started_at` older than this and not yet completed counts as "stuck running" |
 | `health_failed_threshold` | `int` | `5` | Trigger `warning` when failed tries in the window exceed this number |
@@ -509,6 +510,67 @@ curl -H "Authorization: Bearer a-long-random-secret" \
 When neither `status_token` nor `health_token` is set, the endpoint is
 unauthenticated. Because the response includes task args, kwargs and results,
 set a token if any of that is sensitive.
+
+---
+
+## Retention / autoclean
+
+Every `.delay()` writes a `TaskExecution` + `TaskExecutionTry` (+ a
+`TaskExecutionResult`) to the DB, so the task tables grow unbounded unless you
+prune them. Set a retention window on `I3TASKS`:
+
+```python
+from datetime import timedelta
+
+I3TASKS = I3TasksSettings(
+    # ...
+    autoclean_older_than=timedelta(days=30),
+)
+```
+
+Rows whose `created_at` is older than the window are eligible for deletion
+(cascading to their tries and results). Nothing runs automatically on its own —
+you trigger the cleanup:
+
+```bash
+# Uses I3TASKS.autoclean_older_than
+python manage.py i3tasks_clean
+
+# Override the window, or preview first
+python manage.py i3tasks_clean --days 7
+python manage.py i3tasks_clean --days 30 --dry-run
+```
+
+To keep the tables bounded, schedule the cleanup. Three ways, pick one:
+
+- **External cron / Cloud Scheduler** running `python manage.py i3tasks_clean`.
+- **Built-in i3tasks task** — `django_i3tasks.tasks.autoclean_task` runs the
+  cleanup through the task system itself; add it to `I3TASKS.schedules` so the
+  beat endpoint fires it:
+
+  ```python
+  Schedule(module_name='django_i3tasks.tasks', func_name='autoclean_task',
+           cron='0 3 * * *', args=[], kwargs={})            # window from settings
+  # or override the window per-schedule:
+  Schedule(module_name='django_i3tasks.tasks', func_name='autoclean_task',
+           cron='0 3 * * *', args=[], kwargs={'days': 30})
+  ```
+
+- **Directly**, from your own code — the helper is importable:
+
+  ```python
+  from django_i3tasks.maintenance import clean_old_task_executions
+
+  deleted = clean_old_task_executions()                     # window from settings
+  deleted = clean_old_task_executions(timedelta(days=7))    # explicit window
+  ```
+
+**Migration note:** the `0006` uuid migration also honours
+`autoclean_older_than` — if it's set, rows older than the window are pruned
+*before* the uuid backfill, so a not-yet-migrated install rewrites fewer rows.
+On PostgreSQL the backfill is a single `UPDATE ... SET uuid = gen_random_uuid()`
+(distinct uuid per row in one statement); other backends use a per-row loop.
+Already-migrated databases are unaffected (a migration is not re-run).
 
 ---
 
