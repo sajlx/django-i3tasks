@@ -347,7 +347,7 @@ class TaskObj:
         except Exception as e:
             logger.error(
                 f"Error running task {self} -> {e}",
-                # exc_info=True
+                exc_info=True,
             )
             if task_execution_try.try_number <= self.max_retries:
                 try_obj = self.get_try_obj(
@@ -373,7 +373,7 @@ class TaskObj:
                             group.failed_count += 1
                             group.status = TaskGroup.STATUS_FAILED
                             group.save()
-                raise MaxRetriesExceededError(f"Max Retries Exceeded: {self}")
+                raise MaxRetriesExceededError(f"Max Retries Exceeded: {self}") from e
             # raise Exception("TaskExecutionTry is not success")
 
     def sync_run(self, *args, **kwargs):
