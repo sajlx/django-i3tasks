@@ -332,6 +332,8 @@ python manage.py i3tasks_ensure_pubsub
 | `default_max_retries` | `int` | `3` | Maximum retry attempts on failure |
 | `retry_minimum_backoff_seconds` | `int \| None` | `10` | Pub/Sub redelivery backoff floor. `None` on both backoff params leaves the subscription's retry policy unset (Pub/Sub then redelivers with near-zero backoff) |
 | `retry_maximum_backoff_seconds` | `int \| None` | `600` | Pub/Sub redelivery backoff ceiling |
+| `task_retry_backoff_base_seconds` | `int \| None` | `2` | Application-level retry backoff: delay (seconds) before `run_from_async` re-enqueues a failed try, exponential in the try number (`base * 2^(try_number-1)`). `None` or `0` disables the delay (immediate re-enqueue). This blocks the current request/worker thread — keep the cap well under the push ack/dispatch deadline |
+| `task_retry_backoff_max_seconds` | `int` | `60` | Cap on the application-level retry backoff above |
 | `run_queue_create_command_on_startup` | `bool` | `True` | Auto-run `i3tasks_ensure_pubsub` on app startup |
 | `health_token` | `str \| None` | `None` | If set, `/i3/tasks-health/` requires `Authorization: Bearer <token>` or `?token=<token>`; otherwise the endpoint is unauthenticated |
 | `status_token` | `str \| None` | `None` | If set, `/i3/tasks-status/` requires `Authorization: Bearer <token>` or `?token=<token>`. Falls back to `health_token` when unset; otherwise the endpoint is unauthenticated |

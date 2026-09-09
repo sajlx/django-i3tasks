@@ -77,6 +77,8 @@ class I3TasksSettings():
             default_max_retries: int = 3,
             retry_minimum_backoff_seconds: 'int | None' = 10,
             retry_maximum_backoff_seconds: 'int | None' = 600,
+            task_retry_backoff_base_seconds: 'int | None' = 2,
+            task_retry_backoff_max_seconds: int = 60,
             run_queue_create_command_on_startup: bool = True,
             register_client_teardown: bool = True,
             health_token: 'str | None' = None,
@@ -97,6 +99,14 @@ class I3TasksSettings():
         # near-zero backoff and hammers an unreachable push endpoint forever.
         self.retry_minimum_backoff_seconds = retry_minimum_backoff_seconds
         self.retry_maximum_backoff_seconds = retry_maximum_backoff_seconds
+        # Application-level retry backoff (TaskObj.run_from_async): delay before
+        # re-enqueueing a failed task try, exponential in try_number, capped at
+        # task_retry_backoff_max_seconds. None disables the delay (immediate
+        # re-enqueue, the pre-existing behaviour). Blocks the current request/
+        # worker thread — keep the cap well under the push ack/dispatch deadline
+        # (Pub/Sub default 600s, Cloud Run push default 10 min).
+        self.task_retry_backoff_base_seconds = task_retry_backoff_base_seconds
+        self.task_retry_backoff_max_seconds = task_retry_backoff_max_seconds
         self.run_queue_create_command_on_startup = run_queue_create_command_on_startup
         self.register_client_teardown = register_client_teardown
         self.health_token = health_token

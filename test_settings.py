@@ -36,4 +36,5 @@ I3TASKS = I3TasksSettings(
     force_sync=True,
     default_max_retries=3,
     run_queue_create_command_on_startup=False,
+    task_retry_backoff_base_seconds=None,  # disabled: keep tests fast (no real sleep)
 )

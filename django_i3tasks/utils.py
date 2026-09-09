@@ -24,6 +24,7 @@ from django.db import transaction
 
 from .exceptions import MaxRetriesExceededError
 from .queue_manager.google_pubsub import PubSubSystemUtils, get_default_queue_setting
+from .types import I3TasksSettings
 
 from .models import TaskExecution
 from .models import TaskExecutionResult
@@ -168,6 +169,21 @@ class TaskObj:
 
     def __str__(self):
         return f"{self.module_name}.{self.func_name} (ID:{self.task_execution_db_instance.id})"
+
+    @staticmethod
+    def _retry_backoff_seconds(failed_try_number):
+        """Exponential backoff before re-enqueueing a failed try, or 0 to disable.
+
+        base * 2^(failed_try_number - 1), capped at *_max_seconds. Blocks the
+        caller (push view / pull worker), so the cap must stay well under the
+        push ack/dispatch deadline.
+        """
+        I3TASKS: I3TasksSettings = settings.I3TASKS
+        base = getattr(I3TASKS, 'task_retry_backoff_base_seconds', None)
+        if not base:
+            return 0
+        max_seconds = getattr(I3TASKS, 'task_retry_backoff_max_seconds', 60)
+        return min(base * (2 ** (failed_try_number - 1)), max_seconds)
 
     def get_try_obj(
         self,
@@ -350,6 +366,12 @@ class TaskObj:
                 exc_info=True,
             )
             if task_execution_try.try_number <= self.max_retries:
+                backoff_seconds = self._retry_backoff_seconds(task_execution_try.try_number)
+                if backoff_seconds:
+                    logger.info(
+                        f"Retrying {self} in {backoff_seconds}s (try {task_execution_try.try_number})"
+                    )
+                    time.sleep(backoff_seconds)
                 try_obj = self.get_try_obj(
                     # task_execution_try_db_instance=task_execution_try_db_instance,
                     # task_execution_try_id=task_execution_try_id,
