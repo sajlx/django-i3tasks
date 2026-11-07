@@ -333,6 +333,8 @@ python manage.py i3tasks_ensure_pubsub
 | `retry_minimum_backoff_seconds` | `int \| None` | `10` | Pub/Sub redelivery backoff floor. `None` on both backoff params leaves the subscription's retry policy unset (Pub/Sub then redelivers with near-zero backoff) |
 | `retry_maximum_backoff_seconds` | `int \| None` | `600` | Pub/Sub redelivery backoff ceiling |
 | `task_retry_backoff_base_seconds` | `int \| None` | `2` | Application-level retry backoff: delay (seconds) before `run_from_async` re-enqueues a failed try, exponential in the try number (`base * 2^(try_number-1)`). `None` or `0` disables the delay (immediate re-enqueue). This blocks the current request/worker thread — keep the cap well under the push ack/dispatch deadline |
+| `memory_log` | `bool` | `False` | Opt-in. Logs one `i3tasks_memory` line per task run with the process RSS at start/end, the peak sampled while it ran and the other tasks running in the same process at the same time. Numbers are per process (tasks/requests sharing an instance add up), not per task: use it to find which task or combination drives an out-of-memory kill. Linux only (`/proc/self/statm`), no extra dependency |
+| `memory_log_interval_ms` | `int` | `200` | Sampling interval for the peak when `memory_log` is on |
 | `task_retry_backoff_max_seconds` | `int` | `60` | Cap on the application-level retry backoff above |
 | `run_queue_create_command_on_startup` | `bool` | `True` | Auto-run `i3tasks_ensure_pubsub` on app startup |
 | `health_token` | `str \| None` | `None` | If set, `/i3/tasks-health/` requires `Authorization: Bearer <token>` or `?token=<token>`; otherwise the endpoint is unauthenticated |

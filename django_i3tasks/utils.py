@@ -6,6 +6,7 @@
 # from decorators import debug, do_twice
 import json
 import time
+import contextlib
 import functools
 import logging
 import inspect
@@ -23,6 +24,7 @@ from django.conf import settings
 from django.db import transaction
 
 from .exceptions import MaxRetriesExceededError
+from .memory import track_memory
 from .queue_manager.google_pubsub import PubSubSystemUtils, get_default_queue_setting
 from .types import I3TasksSettings
 
@@ -309,10 +311,20 @@ class TaskObj:
         logger.info(mex_debug)
         # logger.info("Something is happening before the function is called.")
         task_result = None
-        if self.bind:
-            task_result = self.func(*args, task_metadata=self, **kwargs)
+        i3tasks_settings = getattr(settings, 'I3TASKS', None)
+        if getattr(i3tasks_settings, 'memory_log', False):
+            memory_tracker = track_memory(
+                self.func_name,
+                execution_id=self.task_execution_db_instance.id,
+                interval_ms=getattr(i3tasks_settings, 'memory_log_interval_ms', 200),
+            )
         else:
-            task_result = self.func(*args, **kwargs)
+            memory_tracker = contextlib.nullcontext()
+        with memory_tracker:
+            if self.bind:
+                task_result = self.func(*args, task_metadata=self, **kwargs)
+            else:
+                task_result = self.func(*args, **kwargs)
         # return func(*args, **kwargs)
         # logger.info("Something is happening after the function is called.")
         end_time = time.perf_counter()  # 2

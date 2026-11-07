@@ -88,6 +88,8 @@ class I3TasksSettings():
             health_stuck_minutes: int = 15,
             health_failed_threshold: int = 5,
             health_pending_age_seconds_threshold: int = 300,
+            memory_log: bool = False,
+            memory_log_interval_ms: int = 200,
     ) -> None:
         self.namespace = namespace
         self.default_queue = default_queue
@@ -119,3 +121,7 @@ class I3TasksSettings():
         self.health_stuck_minutes = health_stuck_minutes
         self.health_failed_threshold = health_failed_threshold
         self.health_pending_age_seconds_threshold = health_pending_age_seconds_threshold
+        # Opt-in: log RSS at start/end/peak of every task run and which other tasks
+        # were running in the same process (see django_i3tasks/memory.py).
+        self.memory_log = memory_log
+        self.memory_log_interval_ms = memory_log_interval_ms
