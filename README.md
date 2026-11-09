@@ -118,8 +118,9 @@ Default Credentials: on Cloud Run, the service account of the service.
 Give the queue an `oidc_service_account` and Pub/Sub signs every push with an OIDC token of
 that account. The push endpoint can then live on a service deployed with
 `--no-allow-unauthenticated`, granting `roles/run.invoker` to that account. `oidc_audience`
-defaults to the push endpoint. Do this whenever the service is reachable: `/i3/tasks-push/`
-runs the function its body names.
+defaults to the push endpoint. Lock the routes whenever the service is reachable: neither view
+checks the caller. `/i3/tasks-push/` re-runs the stored task execution whose id its body names
+(ids are sequential), and `/i3/tasks-beat/` runs every schedule that matches the minute.
 
 ```python
 PUBSUB_CONFIG = {"EMULATOR": False, "PROJECT_ID": "my-project", "CREDENTIALS": None}
