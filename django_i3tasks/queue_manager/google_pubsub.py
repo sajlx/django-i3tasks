@@ -32,6 +32,19 @@ logger = logging.getLogger(__name__)
 REGITERED_TASKS = dict()
 
 
+def _credentials_kwargs():
+    """The client credentials outside the emulator.
+
+    A key file when PUBSUB_CONFIG["CREDENTIALS"] names one. Otherwise nothing, so the
+    client falls back to Application Default Credentials: the service account of a
+    Cloud Run service, with no key file to ship or rotate.
+    """
+    path = settings.PUBSUB_CONFIG.get("CREDENTIALS", None)
+    if not path:
+        return {}
+    return {"credentials": service_account.Credentials.from_service_account_file(path)}
+
+
 def get_default_queue_setting(param, default):
     I3TASKS = getattr(settings, 'I3TASKS', None)
     default_queue = getattr(I3TASKS, 'default_queue', None)
@@ -188,10 +201,7 @@ class PubSubSystemUtils:
             #     scopes=settings.GOOGLE_SLIDES_SCOPES
             # )
 
-            credentials = service_account.Credentials.from_service_account_file(
-                settings.PUBSUB_CONFIG.get("CREDENTIALS", None)
-            )
-            publisher = pubsub_v1.PublisherClient(credentials=credentials)
+            publisher = pubsub_v1.PublisherClient(**_credentials_kwargs())
 
         self._publisher_client = publisher
 
@@ -209,10 +219,7 @@ class PubSubSystemUtils:
             #     scopes=settings.GOOGLE_SLIDES_SCOPES
             # )
 
-            credentials = service_account.Credentials.from_service_account_file(
-                settings.PUBSUB_CONFIG.get("CREDENTIALS", None)
-            )
-            subscription = pubsub_v1.SubscriberClient(credentials=credentials)
+            subscription = pubsub_v1.SubscriberClient(**_credentials_kwargs())
 
         self._subscription_client = subscription
 
@@ -351,7 +358,14 @@ class PubSubSystemUtils:
         )
         if not isinstance(matched_queue, PullQueue):
             _endpoint = endpoint or matched_queue.push_endpoint
-            subscription.push_config = pubsub_v1.types.PushConfig(push_endpoint=_endpoint)
+            push_config = pubsub_v1.types.PushConfig(push_endpoint=_endpoint)
+            oidc_account = getattr(matched_queue, "oidc_service_account", None)
+            if oidc_account:
+                push_config.oidc_token = pubsub_v1.types.PushConfig.OidcToken(
+                    service_account_email=oidc_account,
+                    audience=getattr(matched_queue, "oidc_audience", None) or _endpoint,
+                )
+            subscription.push_config = push_config
 
         retry_policy = self.build_retry_policy()
         if retry_policy is not None:

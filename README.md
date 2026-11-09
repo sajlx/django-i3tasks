@@ -79,6 +79,12 @@ I3TASKS = I3TasksSettings(
 )
 ```
 
+> **Time zone:** `Schedule` takes an optional sixth field, `timezone`, an IANA name such as
+> `"Europe/Rome"`. The beat then matches `cron` against the wall clock of that zone, so a daily
+> `0 9 * * *` stays at 09:00 across daylight saving time. Without it the cron is read in UTC.
+> The beat matches only the minute it is called: a scheduler that hits `/i3/tasks-beat/` every
+> 5 minutes never runs a `7 * * * *` schedule. Call it every minute, or align the crons.
+
 > **Note:** `Queue` remains available as a backward-compatible alias for `PushQueue`. Existing configurations that use `Queue(...)` continue to work without changes.
 
 #### Production (Google Cloud)
@@ -101,6 +107,29 @@ I3TASKS = I3TasksSettings(
     ),
     other_queues=(),
     schedules=(),
+)
+```
+
+#### Cloud Run without a key file, and an authenticated push
+
+Leave `PUBSUB_CONFIG["CREDENTIALS"]` empty (`False` or `None`) and the clients use Application
+Default Credentials: on Cloud Run, the service account of the service.
+
+Give the queue an `oidc_service_account` and Pub/Sub signs every push with an OIDC token of
+that account. The push endpoint can then live on a service deployed with
+`--no-allow-unauthenticated`, granting `roles/run.invoker` to that account. `oidc_audience`
+defaults to the push endpoint. Lock the routes whenever the service is reachable: neither view
+checks the caller. `/i3/tasks-push/` re-runs the stored task execution whose id its body names
+(ids are sequential), and `/i3/tasks-beat/` runs every schedule that matches the minute.
+
+```python
+PUBSUB_CONFIG = {"EMULATOR": False, "PROJECT_ID": "my-project", "CREDENTIALS": None}
+
+default_queue=PushQueue(
+    queue_name="default",
+    subscription_name="default",
+    push_endpoint="https://my-beat-xyz.a.run.app/i3/tasks-push/",
+    oidc_service_account="my-sa@my-project.iam.gserviceaccount.com",
 )
 ```
 
