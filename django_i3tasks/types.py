@@ -7,11 +7,16 @@ from collections import namedtuple
 from datetime import timedelta
 
 
+# `oidc_service_account` makes Pub/Sub sign every push with an OIDC token of that service
+# account, so the push endpoint can live on a service that refuses unauthenticated calls
+# (Cloud Run `--no-allow-unauthenticated`). `oidc_audience` defaults to the endpoint.
 PushQueue = namedtuple('PushQueue', [
     'queue_name',
     'subscription_name',
     'push_endpoint',
-])
+    'oidc_service_account',
+    'oidc_audience',
+], defaults=(None, None))
 
 PullQueue = namedtuple('PullQueue', [
     'queue_name',

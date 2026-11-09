@@ -110,6 +110,28 @@ I3TASKS = I3TasksSettings(
 )
 ```
 
+#### Cloud Run without a key file, and an authenticated push
+
+Leave `PUBSUB_CONFIG["CREDENTIALS"]` empty (`False` or `None`) and the clients use Application
+Default Credentials: on Cloud Run, the service account of the service.
+
+Give the queue an `oidc_service_account` and Pub/Sub signs every push with an OIDC token of
+that account. The push endpoint can then live on a service deployed with
+`--no-allow-unauthenticated`, granting `roles/run.invoker` to that account. `oidc_audience`
+defaults to the push endpoint. Do this whenever the service is reachable: `/i3/tasks-push/`
+runs the function its body names.
+
+```python
+PUBSUB_CONFIG = {"EMULATOR": False, "PROJECT_ID": "my-project", "CREDENTIALS": None}
+
+default_queue=PushQueue(
+    queue_name="default",
+    subscription_name="default",
+    push_endpoint="https://my-beat-xyz.a.run.app/i3/tasks-push/",
+    oidc_service_account="my-sa@my-project.iam.gserviceaccount.com",
+)
+```
+
 ### 5. Ensure Pub/Sub topics and subscriptions exist
 
 Run this once to create the required Pub/Sub resources:
