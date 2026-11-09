@@ -21,13 +21,17 @@ PullQueue = namedtuple('PullQueue', [
 Queue = PushQueue  # backward-compatible alias
 
 
+# `timezone` is an IANA name such as "Europe/Rome". The beat matches `cron` against the
+# wall clock of that zone, so a daily 09:00 stays 09:00 across daylight saving time.
+# None (the default) keeps the historical behaviour: the cron is read in UTC.
 Schedule = namedtuple('Schedule', [
     'module_name',
     'func_name',
     'cron',
     'args',
     'kwargs',
-])
+    'timezone',
+], defaults=(None,))
 
 
 

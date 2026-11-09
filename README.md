@@ -79,6 +79,12 @@ I3TASKS = I3TasksSettings(
 )
 ```
 
+> **Time zone:** `Schedule` takes an optional sixth field, `timezone`, an IANA name such as
+> `"Europe/Rome"`. The beat then matches `cron` against the wall clock of that zone, so a daily
+> `0 9 * * *` stays at 09:00 across daylight saving time. Without it the cron is read in UTC.
+> The beat matches only the minute it is called: a scheduler that hits `/i3/tasks-beat/` every
+> 5 minutes never runs a `7 * * * *` schedule. Call it every minute, or align the crons.
+
 > **Note:** `Queue` remains available as a backward-compatible alias for `PushQueue`. Existing configurations that use `Queue(...)` continue to work without changes.
 
 #### Production (Google Cloud)

@@ -11,6 +11,7 @@ import logging
 import base64
 import datetime
 import importlib
+from zoneinfo import ZoneInfo
 
 from django.views.decorators.csrf import csrf_exempt
 
@@ -82,8 +83,10 @@ class BeatTaskView(View):
                 _kwargs = schedule.kwargs
 
                 cron = schedule.cron
+                timezone = getattr(schedule, "timezone", None)
+                at = now.astimezone(ZoneInfo(timezone)) if timezone else now
 
-                cron_is_matched = croniter.match(cron, now)
+                cron_is_matched = croniter.match(cron, at)
                 logger.info(
                     "test task matching %s.%s at %s for %s",
                     module_name,
