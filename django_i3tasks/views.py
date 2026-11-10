@@ -91,7 +91,7 @@ class BeatTaskView(View):
                     "test task matching %s.%s at %s for %s",
                     module_name,
                     func_name,
-                    now,
+                    at,
                     cron,
                 )
                 if cron_is_matched:
@@ -108,8 +108,12 @@ class BeatTaskView(View):
                     # task_module = importlib.import_module(module_name)
                     # task = getattr(task_module, func_name)
                 else:
-                    iter = croniter(cron, now)
-                    print(iter.get_next(datetime.datetime))
+                    logger.info(
+                        "next run of %s.%s at %s",
+                        module_name,
+                        func_name,
+                        croniter(cron, at).get_next(datetime.datetime),
+                    )
 
             except Exception as exc:
                 logger.error(exc)
