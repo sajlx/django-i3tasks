@@ -28,10 +28,14 @@ def _settings_with(*schedules):
 
 def _beat_at(utc_moment):
     """POST the beat with the clock frozen at `utc_moment`."""
+    class Frozen(datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return utc_moment
+
     clock = mock.Mock(wraps=datetime)
     clock.timezone = datetime.timezone
-    clock.datetime = mock.Mock(wraps=datetime.datetime)
-    clock.datetime.now.return_value = utc_moment
+    clock.datetime = Frozen
     with mock.patch.object(views, "datetime", clock):
         return views.BeatTaskView.as_view()(RequestFactory().post("/i3/tasks-beat/"))
 
@@ -63,3 +67,13 @@ class BeatTimezoneTest(TestCase):
         nine_utc = Schedule("django_i3tasks.tests_tasks", "task_a", "0 9 * * *", [], {})
         self.assertIsNone(nine_utc.timezone)
         self.assertTrue(self._runs(nine_utc, datetime.datetime(2026, 1, 15, 9, 0, 5, tzinfo=datetime.timezone.utc)))
+
+    def test_the_logged_next_run_is_in_the_schedule_timezone(self):
+        nine_rome = Schedule("django_i3tasks.tests_tasks", "task_a", "0 9 * * *", [], {}, "Europe/Rome")
+        moment = datetime.datetime(2026, 1, 15, 12, 0, 5, tzinfo=datetime.timezone.utc)
+        with self.assertLogs("django_i3tasks.views", level="INFO") as logs:
+            self.assertFalse(self._runs(nine_rome, moment))
+        self.assertIn(
+            "next run of django_i3tasks.tests_tasks.task_a at 2026-01-16 09:00:00+01:00",
+            "\n".join(logs.output),
+        )
